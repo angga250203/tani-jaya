@@ -1,0 +1,632 @@
+# Database foundation — Tani Jaya
+
+This document describes the Supabase/PostgreSQL foundation only. The current UI
+continues to use local mock providers. No page, query, or mock-data source has
+been switched to Supabase.
+
+> **Sales + Stock status:** **APPLIED** through
+> `20260921084125_sales_stock_domain.sql`. The applied design follows
+> `docs/PRD-PENJUALAN.md`; existing Pembelian remains the source of stock.
+
+## Entity list
+
+- `app_admins`: minimal allowlist for the single authenticated Admin.
+- `farmers`: active/inactive partner farmers; inactive rows are retained.
+- `fields`: a farmer's named field and location reference.
+- `harvest_cycles`: commodity-specific cycles owned by a field.
+- `harvest_schedules`: effective dates and receiving methods for a cycle.
+- `harvest_schedule_changes`: append-only schedule/date or receiving-method history.
+- `transactions`, `transaction_items`, `transaction_container_weights`: purchases,
+  per-commodity calculations, and each sack/crate weight.
+- `totalans`, `totalan_transactions`: finalized settlement and its selected unpaid
+  partner-farmer transactions.
+- `kasbon_ledger_entries`: append-only advances and deductions.
+
+Sales tables now applied: `sales`, `sale_items`, `sale_stock_allocations`,
+`sale_payments`, `sale_change_events`, and `sale_number_counters`.
+
+`Nota` is intentionally not a table. It remains derived from an immutable source
+record's business number and payment data, consistent with the existing mock
+implementation. A future immutable document/PDF snapshot requirement is the
+threshold for adding a dedicated receipt table.
+
+## Current applied ERD
+
+```mermaid
+erDiagram
+    APP_ADMINS {
+      uuid user_id PK
+    }
+    FARMERS {
+      uuid id PK
+      text status
+    }
+    FIELDS {
+      uuid id PK
+      uuid farmer_id FK
+    }
+    HARVEST_CYCLES {
+      uuid id PK
+      uuid field_id FK
+      text commodity
+    }
+    HARVEST_SCHEDULES {
+      uuid id PK
+      uuid cycle_id FK
+      date scheduled_date
+    }
+    HARVEST_SCHEDULE_CHANGES {
+      uuid id PK
+      uuid schedule_id FK
+    }
+    TRANSACTIONS {
+      uuid id PK
+      uuid farmer_id FK
+      uuid schedule_id FK
+      uuid cycle_id FK
+    }
+    TRANSACTION_ITEMS {
+      uuid id PK
+      uuid transaction_id FK
+    }
+    TRANSACTION_CONTAINER_WEIGHTS {
+      uuid id PK
+      uuid transaction_item_id FK
+    }
+    TOTALANS {
+      uuid id PK
+      uuid farmer_id FK
+    }
+    TOTALAN_TRANSACTIONS {
+      uuid totalan_id FK
+      uuid transaction_id FK
+    }
+    KASBON_LEDGER_ENTRIES {
+      uuid id PK
+      uuid farmer_id FK
+      uuid related_totalan_id FK
+    }
+
+    FARMERS ||--o{ FIELDS : owns
+    FIELDS ||--o{ HARVEST_CYCLES : contains
+    HARVEST_CYCLES ||--o{ HARVEST_SCHEDULES : produces
+    HARVEST_SCHEDULES ||--o{ HARVEST_SCHEDULE_CHANGES : records
+    FARMERS o|--o{ TRANSACTIONS : sells_as_partner
+    HARVEST_SCHEDULES o|--o{ TRANSACTIONS : starts
+    HARVEST_CYCLES o|--o{ TRANSACTIONS : contextualizes
+    TRANSACTIONS ||--|{ TRANSACTION_ITEMS : contains
+    TRANSACTION_ITEMS ||--o{ TRANSACTION_CONTAINER_WEIGHTS : stores
+    FARMERS ||--o{ TOTALANS : receives
+    TOTALANS ||--|{ TOTALAN_TRANSACTIONS : settles
+    TRANSACTIONS o|--o| TOTALAN_TRANSACTIONS : included_once
+    FARMERS ||--o{ KASBON_LEDGER_ENTRIES : ledger
+    TOTALANS o|--o| KASBON_LEDGER_ENTRIES : deduction
+```
+
+## APPLIED: Sales + Stock ERD
+
+This adds a Sales domain beside the applied Pembelian domain. It deliberately
+does not add a customer table or a commodity master. A Sale holds its buyer
+snapshot, and each `sale_items.commodity` is a historical snapshot validated
+against its allocated purchase source.
+
+```mermaid
+erDiagram
+    FARMERS {
+      uuid id PK
+      text name
+    }
+    TRANSACTIONS {
+      uuid id PK
+      text seller_type
+      uuid farmer_id FK
+      text seller_name_snapshot
+    }
+    TRANSACTION_ITEMS {
+      uuid id PK
+      uuid transaction_id FK
+      text commodity
+      text grade "APPLIED: SP | TG | BR"
+      text weighing_method
+      integer gross_weight_kg
+    }
+    TRANSACTION_CONTAINER_WEIGHTS {
+      uuid id PK
+      uuid transaction_item_id FK
+      integer weight_kg
+    }
+    SALES {
+      uuid id PK
+      text sale_number UK
+      date sale_date
+      text buyer_name
+      text buyer_type
+      text delivery_method
+      text status
+    }
+    SALE_ITEMS {
+      uuid id PK
+      uuid sale_id FK
+      text commodity
+      text grade
+      integer gross_weight_kg
+      integer deduction_weight_kg
+      bigint price_per_kg
+    }
+    SALE_STOCK_ALLOCATIONS {
+      uuid id PK
+      uuid sale_item_id FK
+      uuid purchase_item_id FK
+      uuid purchase_container_weight_id FK
+      integer allocated_gross_weight_kg
+      timestamptz released_at
+    }
+    SALE_PAYMENTS {
+      uuid id PK
+      uuid sale_id FK
+      date payment_date
+      bigint amount
+      bigint remaining_balance_after
+    }
+    SALE_CHANGE_EVENTS {
+      uuid id PK
+      uuid sale_id FK
+      text event_type
+      text reason
+    }
+    SALE_NUMBER_COUNTERS {
+      date sale_date PK
+      integer last_sequence
+    }
+
+    FARMERS o|--o{ TRANSACTIONS : optional_partner_source
+    TRANSACTIONS ||--|{ TRANSACTION_ITEMS : contains
+    TRANSACTION_ITEMS ||--o{ TRANSACTION_CONTAINER_WEIGHTS : records
+    SALES ||--|{ SALE_ITEMS : contains
+    SALE_ITEMS ||--|{ SALE_STOCK_ALLOCATIONS : allocates
+    TRANSACTION_ITEMS ||--o{ SALE_STOCK_ALLOCATIONS : direct_source
+    TRANSACTION_CONTAINER_WEIGHTS o|--o{ SALE_STOCK_ALLOCATIONS : container_source
+    SALES ||--o{ SALE_PAYMENTS : receives
+    SALES ||--o{ SALE_CHANGE_EVENTS : records
+```
+
+`purchase_container_weight_id` is nullable only for a direct-weight allocation.
+For a sack/crate allocation it points to the existing container row; its
+`purchase_item_id` must be the item that owns that container.
+
+## Applied design principles
+
+### Stock is physical, derived, and internally traceable
+
+- Any valid saved Pembelian item with available physical stock is eligible for
+  Sales, whether its parent `transactions.seller_type` is `partner_farmer` or
+  `general_seller`.
+- Internal traceability always follows the existing purchase transaction. A
+  partner-farmer source has `farmer_id` when available plus
+  `seller_name_snapshot`; a general-seller source has no `farmer_id` and uses
+  `seller_name_snapshot` as its source identity. This is a **source seller**,
+  not necessarily a farmer.
+- Physical stock-in is `transaction_items.gross_weight_kg`, never its purchase
+  `net_weight_kg`. Purchase deduction therefore affects only the purchase value.
+- Physical stock-out is `sale_items.gross_weight_kg`, never sale net weight.
+  Sale deduction affects only the buyer invoice value.
+- No mutable `current_stock` field is proposed. Availability is derived from
+  purchase gross weight minus active allocation rows. This avoids a stock total
+  that can drift from history.
+- The allocation layer is internal. Buyer Nota data is projected from `sales`,
+  `sale_items`, and payment totals only; it must not select source sellers,
+  purchase transactions, allocation rows, or expedition cost.
+
+### Grade and commodity identity
+
+`transaction_items.grade` is the canonical incoming-stock grade and must be one
+of `SP`, `TG`, or `BR`. A sale item stores both `commodity` and `grade` as
+historical snapshots, not a new commodity master. The future write operation
+must validate that every active allocation has the same commodity and grade as
+its sale item. This preserves readable historical Sales data while keeping the
+existing purchase commodity representation unchanged.
+
+### Lifecycle and payment state are separate
+
+`sales.status` represents only lifecycle: `active` or `cancelled`. It is not a
+mutable payment-status field. `sale_payment_states` derives paid amount,
+remaining balance, and `paid`/`unpaid` from `sum(sale_payments.amount)` versus
+`sales.total_amount`; it reports `cancelled` separately for a cancelled Sale.
+This prevents a header status from becoming inconsistent with payment history.
+
+`DP/Titip` and `Utang` describe only the initial payment choice. They are not
+persisted as a later state: a DP has a first positive payment less than the
+total, while Utang has no first payment.
+
+## Applied schema specification
+
+All identifiers are lowercase snake_case. UUID is used for identifiers, weights
+are whole `integer` kilograms, and all Rupiah fields are `bigint`. `created_at`
+and other audit events are `timestamptz`; business dates are `date`.
+
+### Minimal Purchase-side additions required for Sales
+
+The approved Pembelian workflow, formulas, weighing methods, and existing
+container rows remain unchanged. The only required purchase-table addition is:
+
+| Entity | Column | Type | Nullable | Default | FK | Constraints / meaning |
+|---|---|---:|---|---|---|---|
+| `transaction_items` (existing) | `grade` | `text` | no | none | — | `SP`, `TG`, or `BR`; one physical incoming stock grade per purchase item. A source seller bringing one commodity in different grades uses separate existing purchase-item rows. |
+
+`transaction_container_weights` already gives each sack/crate an immutable
+source ID and physical weight. No duplicated container-weight or stock-source
+table is used. The linked database had no `transaction_items` rows when this
+required `NOT NULL` field was applied, so no historical grade backfill or
+default grade was needed. A future schema change must still never silently
+infer a grade for existing rows.
+
+### `sales` — Sale/Nota header (applied)
+
+| Column | Type | Nullable | Default | FK | Constraints / business meaning |
+|---|---:|---|---|---|---|
+| `id` | `uuid` | no | generated UUID | — | Primary key. |
+| `sale_number` | `text` | no | allocated by database operation | — | Unique, immutable Nota number in `PJ-YYYYMMDD-NNNN` format; never browser-generated. |
+| `sale_date` | `date` | no | none | — | Business date and sequence-counter key. |
+| `buyer_name` | `text` | no | none | — | Trimmed, non-empty snapshot; no customer profile. |
+| `buyer_type` | `text` | no | none | — | `general_buyer`, `weigher_collector`, or `market` for pembeli umum, penimbang/pengepul, or pasar. |
+| `delivery_method` | `text` | no | none | — | `buyer_pickup` or `expedition`. |
+| `expedition_name` | `text` | yes | `null` | — | Required only for `expedition`; internal detail only. |
+| `expedition_rate_per_kg` | `bigint` | yes | `null` | — | Non-negative; required only for `expedition`; internal detail only. |
+| `expedition_cost` | `bigint` | no | derived/stored from gross weight × rate | — | Internal Tani Jaya expense. It is never added to `total_amount` or buyer receivable. It is `0` for buyer pickup. |
+| `total_gross_weight_kg` | `integer` | no | `0` while draft is assembled | — | Sum of sale-item gross weights; final Sale must be positive. |
+| `total_deduction_weight_kg` | `integer` | no | `0` | — | Sum of sale-item deductions. |
+| `total_net_weight_kg` | `integer` | no | `0` | — | Sum of sale-item net weights. |
+| `total_amount` | `bigint` | no | `0` | — | Sum of sale-item subtotals; buyer invoice total only. |
+| `status` | `text` | no | `active` | — | `active` or `cancelled`; separate from payment state. |
+| `cancellation_reason` | `text` | yes | `null` | — | Required, trimmed, non-empty when `status = 'cancelled'`. |
+| `cancelled_at` | `timestamptz` | yes | `null` | — | Required exactly when cancelled. |
+| `created_at` | `timestamptz` | no | `now()` | — | Audit time. |
+| `updated_at` | `timestamptz` | no | `now()` | — | Maintained by the existing shared timestamp pattern. |
+
+Header totals are persisted audited snapshots maintained from persisted
+`sale_items` in the same atomic operation (or a trigger), never client supplied
+independent calculations. Delivery checks require all expedition fields to be
+present only for `expedition`, and absent/zero as applicable for `buyer_pickup`.
+
+### `sale_items` — invoice lines (applied)
+
+| Column | Type | Nullable | Default | FK | Constraints / business meaning |
+|---|---:|---|---|---|---|
+| `id` | `uuid` | no | generated UUID | — | Primary key. |
+| `sale_id` | `uuid` | no | none | `sales.id` | Parent Sale. The normalized `(sale_id, commodity, grade)` identity is unique. |
+| `commodity` | `text` | no | none | — | Trimmed, non-empty historical commodity snapshot; no new master. |
+| `grade` | `text` | no | none | — | `SP`, `TG`, or `BR`; the same commodity at different grades is a different row. |
+| `gross_weight_kg` | `integer` | no | none | — | Positive physical stock-out. |
+| `deduction_weight_kg` | `integer` | no | `0` | — | Whole kg from 0 through gross weight. It does not reduce stock a second time. |
+| `net_weight_kg` | `integer` | no | generated/stored | — | `gross_weight_kg - deduction_weight_kg`. |
+| `price_per_kg` | `bigint` | no | none | — | Non-negative integer Rupiah. |
+| `subtotal` | `bigint` | no | generated/stored | — | `net_weight_kg * price_per_kg`. |
+| `created_at` | `timestamptz` | no | `now()` | — | Audit time. |
+| `updated_at` | `timestamptz` | no | `now()` | — | Audit time for controlled corrections. |
+
+The future operation validates that the active allocations for each line add up
+exactly to `gross_weight_kg`; deductions and price cannot change that physical
+allocation total.
+
+Within one Sale, buyer-facing lines use a unique PostgreSQL expression index on
+`(sale_id, lower(btrim(commodity)), grade)`. The stored `commodity` remains the
+readable snapshot; `lower(btrim(commodity))` makes identity case- and
+outer-whitespace-insensitive without introducing a commodity master or a
+case-sensitive uniqueness bug. Thus Timun SP sourced from several sellers is
+one Sale item with several allocations, while Timun TG remains a separate line.
+
+### `sale_stock_allocations` — internal source consumption (applied)
+
+| Column | Type | Nullable | Default | FK | Constraints / business meaning |
+|---|---:|---|---|---|---|
+| `id` | `uuid` | no | generated UUID | — | Primary key. |
+| `sale_item_id` | `uuid` | no | none | `sale_items.id` | The buyer-facing line consuming the source. |
+| `purchase_item_id` | `uuid` | no | none | `transaction_items.id` | Required source item for both allocation forms. |
+| `purchase_container_weight_id` | `uuid` | yes | `null` | `transaction_container_weights.id` | Exact container source for sack/crate; `null` only for `direct_total`. |
+| `allocated_gross_weight_kg` | `integer` | no | none | — | Positive physical kg allocated. It is partial kg for direct total; it equals the container's complete `weight_kg` for a sack/crate. |
+| `released_at` | `timestamptz` | yes | `null` | — | A released allocation remains historical but no longer consumes stock. It is set for cancellation or allocation replacement, never deleted just to restore stock. |
+| `release_reason` | `text` | yes | `null` | — | Required when released; `sale_corrected` or `sale_cancelled`. |
+| `created_at` | `timestamptz` | no | `now()` | — | Audit time. |
+
+The future database validation must enforce all of the following:
+
+- the purchase transaction is a valid saved Purchase from either permitted
+  seller type and the source item has physical stock available;
+- source commodity and grade equal their `sale_items` snapshot;
+- a direct allocation has a `direct_total` source item and no container ID;
+- a container allocation has a `per_sack`/`per_crate` source item, matches the
+  referenced container's parent item and type, and allocates exactly its full
+  physical weight;
+- each active container allocation is globally unique through a partial unique
+  index on `purchase_container_weight_id where released_at is null`;
+- for direct sources, active allocated kg never exceeds the source item's
+  `gross_weight_kg`; and
+- active allocations for the sale item equal its gross weight exactly.
+
+The unique container index is the database-level protection against selling one
+karung/peti twice. Aggregate direct-weight availability cannot be guaranteed by
+a simple `CHECK`; the controlled transaction must lock source purchase-item rows
+in ascending UUID order, calculate active allocation totals, then insert/update
+the allocation inside that same short transaction.
+
+### `sale_payments` — cash payment history (applied)
+
+| Column | Type | Nullable | Default | FK | Constraints / business meaning |
+|---|---:|---|---|---|---|
+| `id` | `uuid` | no | generated UUID | — | Primary key. |
+| `sale_id` | `uuid` | no | none | `sales.id` | Exactly one Sale/Nota per payment. |
+| `payment_date` | `date` | no | none | — | Operational date of the cash payment. |
+| `amount` | `bigint` | no | none | — | Positive integer Rupiah. No bank/e-wallet fields are proposed for P0. |
+| `remaining_balance_after` | `bigint` | no | none | — | Non-negative balance snapshot after this payment, written by the atomic payment operation for audit/readability. |
+| `created_at` | `timestamptz` | no | `now()` | — | Audit time. |
+
+`created_at` is the immutable ledger/audit order. `payment_date` remains the
+operational payment date, and `remaining_balance_after` is calculated when the
+controlled atomic operation inserts the row. `sum(sale_payments.amount)` is the
+source of truth for current paid amount and state; the balance snapshot is not a
+mutable header balance. Ordinary direct editing, deletion, or reordering of
+payment rows is not allowed. `recorded_by` is intentionally not proposed: this
+is the existing single-Admin architecture and `created_at` plus the
+authenticated operation already identify its administrative context without
+extending the Auth schema.
+
+### `sale_change_events` — required cancellation/correction reasons (applied)
+
+| Column | Type | Nullable | Default | FK | Constraints / business meaning |
+|---|---:|---|---|---|---|
+| `id` | `uuid` | no | generated UUID | — | Primary key. |
+| `sale_id` | `uuid` | no | none | `sales.id` | Sale being changed. |
+| `event_type` | `text` | no | none | — | `corrected` or `cancelled`. |
+| `reason` | `text` | no | none | — | Trimmed, non-empty reason required by the PRD. |
+| `created_at` | `timestamptz` | no | `now()` | — | Audit time. |
+
+The header keeps the current cancellation state for fast queries; this small
+append-only relation preserves a reason for every correction as well as the
+cancellation reason. It does not introduce a customer, stock, or profit
+abstraction.
+
+### `sale_number_counters` — concurrency-safe Nota sequencing (applied)
+
+| Column | Type | Nullable | Default | FK | Constraints / business meaning |
+|---|---:|---|---|---|---|
+| `sale_date` | `date` | no | none | — | Primary key; one counter per business date. |
+| `last_sequence` | `integer` | no | `0` | — | `0..9999`; incremented atomically. |
+| `created_at` | `timestamptz` | no | `now()` | — | Audit time. |
+| `updated_at` | `timestamptz` | no | `now()` | — | Audit time. |
+
+The future create-Sale database operation must atomically upsert the row for
+`sale_date`, increment and return `last_sequence`, then format
+`PJ-YYYYMMDD-NNNN` and insert the uniquely constrained `sales.sale_number` in
+the same transaction. A deleted no-payment sale does not decrement this counter,
+so a Nota number is never reused. This avoids the race in `SELECT count(*) + 1`
+and browser-side numbering.
+
+### Derived read models (applied)
+
+The following should be non-editable `security_invoker` views (or equivalent
+read-only, server-side queries); neither is a manually maintained stock table.
+
+| Read model | Source / output | Rule |
+|---|---|---|
+| `available_sale_direct_stock` | Eligible direct purchase item, commodity, grade, source seller identity, gross incoming kg, active allocated kg, remaining kg | `remaining = transaction_items.gross_weight_kg - sum(active direct allocations)`; rows with `remaining <= 0` are omitted. The source seller comes from the purchase transaction: optional farmer plus seller snapshot, or general-seller snapshot. |
+| `available_sale_container_stock` | Eligible individual sack/crate with commodity, grade, source seller identity, container ID/type/weight | Only a container with no active allocation is available. A released allocation does not block it. |
+| `sale_payment_states` | Sale total, total paid, remaining balance, effective payment state | `remaining = total_amount - sum(payments)`; reports `paid`, `unpaid`, or `cancelled` from the lifecycle plus payment totals. |
+
+The stock views join allocations only when `released_at is null` and the parent
+Sale is `active`, as a defensive read condition. A successful cancellation must
+also set `released_at` atomically so the partial unique container index permits
+the container to be sold again.
+
+## Applied controlled atomic operations
+
+Direct table writes cannot safely enforce all cross-row stock and payment rules.
+The applied migration exposes narrow, Admin-authorized database operations
+rather than accepting independent browser writes to sale headers, lines,
+allocations, counters, and payments.
+
+| Operation | Required atomic work |
+|---|---|
+| Create Sale | Authorize Admin; allocate number; lock all source purchase items and containers in stable UUID order; verify availability and source/grade match; insert Sale, lines, and allocations; calculate header totals/expedition cost; optionally insert one valid initial cash payment; commit. |
+| Record payment | Lock the active Sale and its payment history; derive remaining balance; reject amount `<= 0` or above remaining; insert payment with balance snapshot; commit. |
+| Correct Sale | Lock old and proposed sources in stable order; reject a corrected total below already received cash because refund automation is outside P0; release replaced allocations and insert replacements in one transaction; recompute the same Sale's item/header totals; append `corrected` reason; commit. This yields the final consumption, not old plus new consumption. |
+| Cancel Sale | Lock the Sale; preserve Sale, items, allocations, and payments; set lifecycle cancellation fields; release its active allocations with reason; append event; commit. No refund is created. |
+| Hard delete Sale | Lock the Sale; reject if any payment exists; then delete the header. Child Sale items and allocations may cascade only in this no-payment case, leaving no orphan allocations and automatically making stock available. |
+
+The lock scope must stay short and contain no network calls. The purchase items
+and containers must always be acquired in a consistent ID order to avoid
+deadlocks when one Sale uses stock from multiple source sellers.
+
+### Finalized P0 correction and reporting rules
+
+- A Sale with payment history may be corrected only when its revised
+  `total_amount >= sum(sale_payments.amount)`. A smaller total is rejected:
+  refund/customer-credit handling is outside P0.
+- Cancelled Sales remain visible and traceable in Sales history, but normal
+  monthly totals filter to `sales.status = 'active'`. Cancelled records do not
+  contribute to the valid-note count, physical gross stock-out, net sale weight,
+  Sale value, cash received, or buyer receivable. They may be displayed
+  separately.
+
+### Purchase edit lock after Sales use
+
+A Purchase source is historically used as soon as a retained
+`sale_stock_allocations` row exists, including a row released by Sale
+cancellation or correction. Its stock-relevant fields must then be locked from
+ordinary Pembelian edits: commodity, grade, weighing method, gross physical
+weight, individual sack/crate weights, and source seller/farmer identity where
+changing it would invalidate traceability. Non-stock metadata such as notes may
+continue to follow the existing Pembelian edit rules.
+
+If a Purchase source has never appeared in a retained allocation, its
+stock-relevant fields remain governed by the approved Pembelian rules. If a
+permitted no-payment Sale is permanently deleted, its child allocation rows are
+legitimately removed; that deleted Sale leaves no surviving Sales allocation
+history to trigger this lock. P0 deliberately does not introduce a separate
+Purchase stock-correction workflow.
+
+## Applied indexes and uniqueness
+
+Every foreign-key column below receives an index unless already covered by a
+primary/unique key.
+
+| Entity | Applied index / constraint | Reason |
+|---|---|---|
+| `transaction_items` | `grade` check; existing `transaction_id` index remains | Grade is the required minimal stock-source addition; source joins remain indexed. |
+| `sales` | unique `sale_number`; `(sale_date desc)`; `(status, sale_date desc)` | Nota lookup, monthly reporting, and active/cancelled history. |
+| `sales` | `lower(btrim(buyer_name)) text_pattern_ops` index | Buyer-name equality/prefix search without a customer master. Do not add trigram search until the search UX requires infix matching. |
+| `sale_items` | `(sale_id)`; unique expression `(sale_id, lower(btrim(commodity)), grade)`; `(commodity, grade)` | Header join, one normalized commodity/grade line per Sale, and commodity/grade history filtering. |
+| `sale_stock_allocations` | `(sale_item_id)`; `(purchase_item_id)` plus `(purchase_item_id) where released_at is null`; `(purchase_container_weight_id)` plus unique `(purchase_container_weight_id) where purchase_container_weight_id is not null and released_at is null` | Foreign-key safety, direct-stock aggregation, and one active sale per container. |
+| `sale_payments` | `(sale_id, created_at, id)`; `(payment_date desc)` | Read immutable ledger order and report cash received by business date. |
+| `sale_change_events` | `(sale_id, created_at desc)` | Ordered audit display. |
+| `sale_number_counters` | primary key `(sale_date)` | Atomic per-date number allocation. |
+
+The migration applies only these direct joins and documented query indexes.
+Review common reporting/filter plans with `EXPLAIN ANALYZE` after representative
+production data exists before adding further indexes.
+
+## Applied foreign-key delete strategy
+
+| Child → parent | Applied action | Why |
+|---|---|---|
+| `sales` items → `sales` | `CASCADE` | Only supports the permitted hard delete of a Sale with no payments. |
+| allocations → `sale_items` | `CASCADE` | Removes child allocations with the no-payment hard delete and prevents orphans. Cancellation never deletes them; it releases them. |
+| allocations → `transaction_items` | `RESTRICT` | Purchase-stock source traceability must not be destroyed. |
+| allocations → `transaction_container_weights` | `RESTRICT` | An allocated container cannot be deleted or detached from history. |
+| payments → `sales` | `RESTRICT` | A Sale with payment history cannot be hard deleted; payment history cannot disappear by cascade. |
+| change events → `sales` | `CASCADE` | A no-payment Sale may be permanently deleted per PRD; its no-payment correction/cancellation metadata has no surviving parent. |
+| existing `transaction_items` → `transactions` | keep `RESTRICT` | The approved purchase history remains intact. |
+| existing containers → purchase items | keep `RESTRICT` | Container traceability remains intact. |
+
+There is no `SET NULL` relationship in the applied Sales chain: every retained
+financial or stock-traceability row requires its parent. The only cascades are
+strictly bounded to the explicitly permitted no-payment hard-delete path.
+
+## Applied RLS and access model
+
+- RLS is enabled on every public Sales table, including technical counter
+  data. Continue using the existing `app_admins` allowlist and
+  `private.is_current_admin()` predicate, evaluated once in policies.
+- `anon` receives no table grants, no policies, and no operational data access.
+- An allowlisted authenticated Admin may read the Sales domain needed for the
+  application. Views must use `security_invoker = true` so their underlying
+  table RLS still applies.
+- Direct `INSERT`/`UPDATE`/`DELETE` on the counter, allocations, payments, and
+  change events are not broadly granted. In particular, payment rows are
+  append-only and ordered by immutable `created_at`. The applied narrow
+  creation, correction, cancellation, payment, and deletion operations perform
+  their own Admin check and enforce the atomic rules above.
+- Be conservative with deletion: no normal `DELETE` policy for
+  `sale_payments`, allocation history, or change events. The only permitted
+  permanent Sale deletion is a controlled operation that first proves payment
+  history is empty. No service-role credential is required.
+
+## Buyer Nota versus Admin detail
+
+| Buyer Nota projection | Admin detail may additionally show |
+|---|---|
+| Tani Jaya identity; sale number/date; buyer name; commodity; grade; gross, deduction, and net kg; price/kg; subtotal; total; total paid; remaining balance; effective payment status; delivery method | Source seller/farmer where applicable; originating purchase item; individual container allocations; expedition name; expedition rate/kg; and expedition total cost. |
+
+Buyer-facing projections must never include source seller/farmer, purchase transaction,
+internal allocation, expedition rate, or expedition cost. No separate Nota
+table is necessary for P0; the projection is derived from persisted Sale data.
+
+## Validation walkthrough
+
+| Case | Expected applied result |
+|---|---|
+| A — Partner Farmer Purchase: containers 32, 35, 31 kg; sell 32 + 31 | Two active allocation rows point to the exact 32 and 31 kg container IDs and trace to the partner farmer through the purchase transaction. Physical stock-out is 63 kg; the 35 kg container has no active allocation and remains available. |
+| B — General Seller Purchase: direct 100 kg; sell 40 kg | One direct allocation points to the general seller's purchase item. The seller is internally identified by `seller_name_snapshot`; derived availability is `100 - 40 = 60 kg`. |
+| C — Timun SP 100 kg: 40 kg Partner Farmer A + 60 kg General Seller B | One `sale_items` row has two internal allocation rows, each to its own purchase item. Buyer Nota shows only Timun SP 100 kg; Admin detail shows 40 kg from Partner Farmer A and 60 kg from General Seller B. |
+| D — gross 100 kg, sale deduction 4 kg | The allocation and physical stock-out are 100 kg. `sale_items.net_weight_kg` is 96 kg and its subtotal uses 96 kg. |
+| E — Rp1,000,000 with payments Rp300,000, Rp400,000, Rp300,000 | Three immutable payment rows retain balances Rp700,000, Rp300,000, Rp0. The derived state becomes `paid`. |
+| F — paid Sale cancelled | The Sale, items, allocations, payments, and cancellation event remain. Allocations are released, so stock is available again; no refund row is created. |
+| G — incorrect Sale with no payments hard deleted | The controlled delete allows it. Sale items and allocations cascade with their parent, no allocation is orphaned, and the source becomes available again. |
+
+## Migration readiness record
+
+There were no remaining unresolved Sales + Stock P0 decisions when the migration
+was applied. The read-only linked-database check on 2026-09-21 returned
+`transaction_items_count = 0`; `transaction_items.grade` was therefore applied
+as required `NOT NULL` without historical classification or a default grade.
+
+## Important data rules
+
+- UUID is the database key. Human readable `transaction_number` and
+  `totalan_number` are separate unique business identifiers.
+- Operational dates use `date`; actual events/audit fields use `timestamptz`.
+- Weight is `integer` whole kilograms. Rupiah is `bigint`; there is no float or
+  decimal money field.
+- `transaction_items.net_weight_kg` and `subtotal` are generated from source
+  inputs. A trigger refreshes transaction totals from the persisted items.
+- A general seller has no `farmer_id` and only a name snapshot. A partner farmer
+  requires a `farmer_id`; the name snapshot protects historical receipts.
+- `totalan_transactions.transaction_id` is unique, so a transaction cannot be
+  in two totalans. Its effective state is exposed by
+  `transaction_payment_states`: `paid`, `unpaid`, or `included_in_totalan`.
+  This avoids a second conflicting base payment-status column.
+- `totalans` have a gross amount, kasbon deduction and final amount check:
+  `final = gross - deduction`; a deduction cannot exceed gross harvest value.
+- Kasbon balance is a view over append-only ledger entries, never a separately
+  editable balance. A totalan-linked deduction must equal the totalan's stored
+  deduction and may not exceed the farmer's current ledger balance.
+- Finalized totalans and ledger entries reject update/delete operations. All
+  financial and historical FKs use `RESTRICT`, never broad `CASCADE`.
+
+## Schedule rules
+
+`created_at` is not a harvest or schedule starting date. Only
+`first_harvest_at` records a real first harvest. The partial unique index permits
+multiple active cycles on a field only when their normalized commodities differ.
+
+`harvest_schedules.receiving_method` stores the effective method; the cycle value
+is only the default used when generating a schedule. A schedule is not marked
+“late” or “postponed”: late is derived from its date and operational date, while
+the `harvest_schedule_changes` history records rescheduling or method changes.
+Its `scope` preserves whether a change was made for one schedule or the current
+and following schedules.
+
+## Constraints and indexes
+
+The migration contains:
+
+- partial unique active-cycle index by `(field_id, lower(trim(commodity)))`;
+- seller source, weights, deduction, generated subtotal/net, financial total,
+  and totalan membership constraints;
+- container-type trigger ensuring sacks/crates match their item's weighing mode;
+- query indexes for dashboard dates, farmer histories, schedules, reporting,
+  transaction items, totalans, and ledger histories;
+- one shared `set_updated_at` trigger function for mutable records.
+
+## RLS strategy
+
+All operational and financial tables have RLS enabled. The single Admin is
+allowlisted in `app_admins` using their `auth.users` UUID. Policies grant data
+access only when `is_current_admin()` is true; `app_admins` itself remains
+service-role provisioned. Before connecting the UI, create the intended Admin
+auth user and insert only that user's ID into `app_admins` with a secure server
+or Supabase dashboard workflow. Financial tables are never exposed to `anon`.
+
+## Future integration boundary
+
+`src/types/database.types.ts` is the generated database-schema source of truth.
+The first migrated module should add an adapter that maps its snake_case rows to
+the existing camelCase domain model, rather than duplicating database schema
+types inside the UI layer.
+
+Totalan finalization must become one Supabase RPC/database transaction: lock the
+farmer row, verify selected unpaid transactions, insert the totalan and join
+rows, insert its ledger deduction, then commit. The schema's uniqueness, FK,
+amount checks and farmer-row lock in the ledger trigger are designed for that
+future RPC.
+
+## PRD ambiguities retained for the next phase
+
+- The PRD mentions estimated harvest count in a flow, but the current UI types
+  do not store or use it. No speculative field was added.
+- The PRD mentions allocation to a specific kasbon (for example, plastic debt),
+  while current mock behavior supports only a general totalan deduction. The
+  ledger preserves the general deduction; a separate advance-allocation table
+  should wait for an approved allocation UX/workflow.
+- Transaction deletion after a totalan requires a versioned recalculation/nota
+  policy that is not defined by the mock flow. The base schema retains history
+  and intentionally does not introduce a destructive delete workflow.

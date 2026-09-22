@@ -1,26 +1,145 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --tj-canvas: #f7f8f5;
+  --tj-surface: #ffffff;
+  --tj-text: #0e3d23;
+  --tj-muted: #537160;
+  --tj-border: #c8d8cc;
+  --tj-primary: #176b3a;
+  --tj-primary-strong: #0e4b28;
+  --tj-primary-soft: #ddede2;
+  --tj-success: var(--tj-primary-strong);
+  --tj-success-soft: var(--tj-primary-soft);
+  --tj-warning: #a96a16;
+  --tj-warning-soft: #f8eaca;
+  --tj-danger: #b9382d;
+  --tj-danger-soft: #fbe1de;
+  --tj-info: #266aa5;
+  --tj-info-soft: #deefff;
+  --tj-shadow-sm: 0 1px 2px rgb(14 61 35 / 0.05);
+  --tj-shadow-md: 0 8px 24px rgb(14 61 35 / 0.08);
+  --background: var(--tj-canvas);
+  --foreground: var(--tj-text);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-tj-canvas: var(--tj-canvas);
+  --color-tj-surface: var(--tj-surface);
+  --color-tj-text: var(--tj-text);
+  --color-tj-muted: var(--tj-muted);
+  --color-tj-border: var(--tj-border);
+  --color-tj-primary: var(--tj-primary);
+  --color-tj-primary-strong: var(--tj-primary-strong);
+  --color-tj-primary-soft: var(--tj-primary-soft);
+  --color-tj-success: var(--tj-success);
+  --color-tj-success-soft: var(--tj-success-soft);
+  --color-tj-warning: var(--tj-warning);
+  --color-tj-warning-soft: var(--tj-warning-soft);
+  --color-tj-danger: var(--tj-danger);
+  --color-tj-danger-soft: var(--tj-danger-soft);
+  --color-tj-info: var(--tj-info);
+  --color-tj-info-soft: var(--tj-info-soft);
+  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  border-color: var(--tj-border);
+}
+
+html {
+  background: var(--tj-canvas);
+  color: var(--tj-text);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  min-width: 320px;
+  background: var(--tj-canvas);
+  color: var(--tj-text);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button,
+[role="button"],
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+:focus-visible {
+  outline: 3px solid rgb(23 107 58 / 0.32);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: var(--tj-primary-soft);
+  color: var(--tj-primary-strong);
+}
+
+@media print {
+  @page {
+    size: auto;
+    margin: 6mm;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    color: #111 !important;
+  }
+
+  .nota-print-document,
+  .nota-print-document * {
+    color: #111 !important;
+    box-shadow: none !important;
+  }
+
+  body:has(.nota-print-document) nav,
+  body:has(.nota-print-document) aside,
+  body:has(.thermal-receipt) nav,
+  body:has(.thermal-receipt) aside {
+    display: none !important;
+  }
+
+  body:has(.thermal-receipt) main > :not(:has(.thermal-receipt)),
+  body:has(.thermal-receipt) nav,
+  body:has(.thermal-receipt) aside {
+    display: none !important;
+  }
+
+  body:has(.sale-nota-print) nav,
+  body:has(.sale-nota-print) aside,
+  body:has(.sale-nota-print) .print\:hidden {
+    display: none !important;
+  }
+
+  .sale-nota-digital {
+    border: 0 !important;
+    box-shadow: none !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  .thermal-receipt {
+    --thermal-receipt-width: 72mm;
+    width: min(100%, var(--thermal-receipt-width)) !important;
+    max-width: var(--thermal-receipt-width) !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    margin: 0 auto !important;
+  }
+
+  .receipt-logo {
+    filter: grayscale(1) contrast(1.1);
+  }
 }
