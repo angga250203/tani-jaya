@@ -30,7 +30,7 @@ export function ScheduleForm() {
 
   const save = () => {
     if (!selectedFarmer || !selectedField || !selectedCycle || !dateISO) return;
-    const schedule = addSchedule({ farmer: selectedFarmer.name, field: selectedField.name, commodity: selectedCycle.commodity, cycleId: selectedCycle.id, dateISO, method });
+    const schedule = addSchedule({ farmerId: selectedFarmer.id, fieldId: selectedField.id, cycleId: selectedCycle.id, farmer: selectedFarmer.name, field: selectedField.name, commodity: selectedCycle.commodity, dateISO, method });
     setSaved(true);
     window.setTimeout(() => router.push(`/jadwal/${schedule.id}`), 500);
   };

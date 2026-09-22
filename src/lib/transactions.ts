@@ -4,7 +4,7 @@ export type WeighingMethod = "TOTAL_LANGSUNG" | "PER_KARUNG" | "PER_PETI";
 export type PurchaseGrade = "SP" | "TG" | "BR";
 
 export type TransactionItem = { id: string; commodity: string; grade: PurchaseGrade; weighingMethod: WeighingMethod; containerWeights: number[]; grossWeight: number; deduction: number; netWeight: number; pricePerKg: number; subtotal: number; stockHistoryLocked?: boolean };
-export type TransactionRecord = { id: string; transactionDate: string; transactionTime: string; sellerType: SellerType; farmerId?: string; sellerName: string; scheduleId?: string; cycleId?: string; paymentStatus: PaymentStatus; totalanId?: string; notes: string; items: TransactionItem[]; totalNetWeight: number; totalAmount: number };
+export type TransactionRecord = { id: string; transactionDate: string; transactionTime: string; sellerType: SellerType; farmerId?: string; sellerName: string; scheduleId?: string; fieldId?: string; cycleId?: string; paymentStatus: PaymentStatus; totalanId?: string; notes: string; items: TransactionItem[]; totalNetWeight: number; totalAmount: number };
 
 export function calculateGrossWeight(method: WeighingMethod, directWeight: number, containerWeights: number[]) { return method === "TOTAL_LANGSUNG" ? directWeight : containerWeights.reduce((sum, weight) => sum + weight, 0); }
 export function calculateNetWeight(grossWeight: number, deduction: number) { return Math.max(0, grossWeight - deduction); }

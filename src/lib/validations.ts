@@ -102,6 +102,7 @@ export const transactionFormSchema = z.object({
   farmerId: z.string().optional(),
   sellerName: z.string().trim().optional(),
   scheduleId: z.string().optional(),
+  fieldId: z.string().optional(),
   cycleId: z.string().optional(),
   paymentStatus: z.enum(["PAID", "UNPAID"]).optional(),
   notes: z.string().trim().optional(),

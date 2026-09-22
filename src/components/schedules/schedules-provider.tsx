@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useMemo, useState, type ReactNo
 import { harvestSchedules, type HarvestSchedule, type HarvestScheduleStatus } from "@/lib/harvest-schedules";
 import { operationalDateISO } from "@/lib/operational-date";
 
-type NewSchedule = Omit<HarvestSchedule, "id" | "initials" | "status" | "statusLabel" | "date"> & { farmer: string };
+type NewSchedule = Omit<HarvestSchedule, "id" | "initials" | "status" | "statusLabel" | "date">;
 type SchedulesContextValue = {
   schedules: HarvestSchedule[];
   addSchedule: (schedule: NewSchedule) => HarvestSchedule;
@@ -51,7 +51,6 @@ export function SchedulesProvider({ children }: { children: ReactNode }) {
       return current.map((schedule) => {
         const isCurrentSchedule = schedule.id === id;
         const belongsToSameScheduleSeries = scope === "following"
-          && Boolean(source.cycleId)
           && schedule.cycleId === source.cycleId
           && schedule.dateISO >= source.dateISO;
 

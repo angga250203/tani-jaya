@@ -2,7 +2,14 @@ export type HarvestScheduleStatus = "today" | "upcoming" | "warning";
 
 export type HarvestSchedule = {
   id: string;
-  cycleId?: string;
+  /**
+   * A schedule is an operational read model. These IDs retain the source
+   * Farmer → Field → Cycle relationship; the accompanying strings are only
+   * display snapshots.
+   */
+  farmerId: string;
+  fieldId: string;
+  cycleId: string;
   farmer: string;
   initials: string;
   commodity: string;
@@ -15,6 +22,16 @@ export type HarvestSchedule = {
   wasPostponed?: boolean;
 };
 
+export type PurchaseScheduleContext = {
+  scheduleId: string;
+  farmerId: string;
+  fieldId: string;
+  cycleId: string;
+  farmerName: string;
+  fieldName: string;
+  commodity: string;
+};
+
 export type HarvestScheduleDetail = HarvestSchedule & {
   intervalDays: number;
   landmark: string;
@@ -23,14 +40,30 @@ export type HarvestScheduleDetail = HarvestSchedule & {
   nextDateISO: string;
 };
 
+const cabaiRawitCycle = {
+  farmerId: "petani-001",
+  fieldId: "lahan-001",
+  cycleId: "siklus-001",
+  farmer: "Budi Santoso",
+  initials: "BS",
+  commodity: "Cabai Rawit",
+  field: "Lahan Utara",
+} as const;
+
+const tomatCycle = {
+  farmerId: "petani-001",
+  fieldId: "lahan-002",
+  cycleId: "siklus-002",
+  farmer: "Budi Santoso",
+  initials: "BS",
+  commodity: "Tomat",
+  field: "Lahan Selatan",
+} as const;
+
 export const harvestSchedules: HarvestSchedule[] = [
   {
     id: "jadwal-001",
-    cycleId: "siklus-001",
-    farmer: "Budi Santoso",
-    initials: "BS",
-    commodity: "Cabai Rawit",
-    field: "Lahan Utara",
+    ...cabaiRawitCycle,
     date: "15 September 2026",
     dateISO: "2026-09-15",
     method: "Diambil",
@@ -39,37 +72,27 @@ export const harvestSchedules: HarvestSchedule[] = [
   },
   {
     id: "jadwal-002",
-    farmer: "Dewi Ayu",
-    initials: "DA",
-    commodity: "Sawi Putih",
-    field: "Kebun Tengah",
-    date: "15 September 2026",
-    dateISO: "2026-09-15",
+    ...tomatCycle,
+    date: "19 September 2026",
+    dateISO: "2026-09-19",
     method: "Diantar",
-    status: "today",
-    statusLabel: "Hari Ini",
+    status: "upcoming",
+    statusLabel: "Akan Datang",
   },
   {
     id: "jadwal-003",
-    farmer: "Hasan Basri",
-    initials: "HB",
-    commodity: "Bayam",
-    field: "Lahan Barat",
-    date: "15 September 2026",
-    dateISO: "2026-09-15",
+    ...cabaiRawitCycle,
+    date: "22 September 2026",
+    dateISO: "2026-09-22",
     method: "Diambil",
-    status: "today",
-    statusLabel: "Hari Ini",
+    status: "upcoming",
+    statusLabel: "Akan Datang",
   },
   {
     id: "jadwal-004",
-    cycleId: "siklus-002",
-    farmer: "Siti Aminah",
-    initials: "SA",
-    commodity: "Tomat",
-    field: "Lahan Belakang",
-    date: "16 September 2026",
-    dateISO: "2026-09-16",
+    ...tomatCycle,
+    date: "24 September 2026",
+    dateISO: "2026-09-24",
     method: "Diantar",
     status: "upcoming",
     statusLabel: "Akan Datang",
@@ -77,12 +100,9 @@ export const harvestSchedules: HarvestSchedule[] = [
   },
   {
     id: "jadwal-005",
-    farmer: "Wati Lestari",
-    initials: "WL",
-    commodity: "Kangkung",
-    field: "Kebun Sungai",
-    date: "17 September 2026",
-    dateISO: "2026-09-17",
+    ...cabaiRawitCycle,
+    date: "29 September 2026",
+    dateISO: "2026-09-29",
     method: "Diantar",
     status: "upcoming",
     statusLabel: "Akan Datang",
@@ -90,82 +110,61 @@ export const harvestSchedules: HarvestSchedule[] = [
   },
   {
     id: "jadwal-006",
-    farmer: "Joko Prasetyo",
-    initials: "JP",
-    commodity: "Terong",
-    field: "Kebun Timur",
-    date: "18 September 2026",
-    dateISO: "2026-09-18",
-    method: "Diambil",
+    ...tomatCycle,
+    date: "29 September 2026",
+    dateISO: "2026-09-29",
+    method: "Diantar",
     status: "upcoming",
     statusLabel: "Akan Datang",
   },
   {
     id: "jadwal-007",
-    farmer: "Yanto Suherman",
-    initials: "YS",
-    commodity: "Sawi Hijau",
-    field: "Lahan Utara",
-    date: "19 September 2026",
-    dateISO: "2026-09-19",
-    method: "Diambil",
+    ...tomatCycle,
+    date: "4 Oktober 2026",
+    dateISO: "2026-10-04",
+    method: "Diantar",
     status: "upcoming",
     statusLabel: "Akan Datang",
   },
   {
     id: "jadwal-008",
-    farmer: "Sri Wahyuni",
-    initials: "SW",
-    commodity: "Buncis",
-    field: "Kebun Lereng",
-    date: "20 September 2026",
-    dateISO: "2026-09-20",
-    method: "Diantar",
+    ...cabaiRawitCycle,
+    date: "6 Oktober 2026",
+    dateISO: "2026-10-06",
+    method: "Diambil",
     status: "upcoming",
     statusLabel: "Akan Datang",
   },
   {
     id: "jadwal-009",
-    farmer: "Roni Kurniawan",
-    initials: "RK",
-    commodity: "Timun",
-    field: "Lahan Selatan",
-    date: "21 September 2026",
-    dateISO: "2026-09-21",
-    method: "Diambil",
-    status: "upcoming",
-    statusLabel: "Akan Datang",
-  },
-  {
-    id: "jadwal-010",
-    farmer: "Maya Sari",
-    initials: "MS",
-    commodity: "Selada",
-    field: "Kebun Tengah",
-    date: "23 September 2026",
-    dateISO: "2026-09-23",
+    ...tomatCycle,
+    date: "9 Oktober 2026",
+    dateISO: "2026-10-09",
     method: "Diantar",
     status: "upcoming",
     statusLabel: "Akan Datang",
   },
   {
-    id: "jadwal-011",
-    farmer: "Dedi Irawan",
-    initials: "DI",
-    commodity: "Cabai Besar",
-    field: "Lahan Barat",
-    date: "25 September 2026",
-    dateISO: "2026-09-25",
+    id: "jadwal-010",
+    ...cabaiRawitCycle,
+    date: "13 Oktober 2026",
+    dateISO: "2026-10-13",
     method: "Diambil",
     status: "upcoming",
     statusLabel: "Akan Datang",
   },
   {
+    id: "jadwal-011",
+    ...tomatCycle,
+    date: "14 Oktober 2026",
+    dateISO: "2026-10-14",
+    method: "Diantar",
+    status: "upcoming",
+    statusLabel: "Akan Datang",
+  },
+  {
     id: "jadwal-012",
-    farmer: "Agus Rahman",
-    initials: "AR",
-    commodity: "Cabai Besar",
-    field: "Lahan Sungai",
+    ...cabaiRawitCycle,
     date: "14 September 2026",
     dateISO: "2026-09-14",
     method: "Diambil",
@@ -176,6 +175,18 @@ export const harvestSchedules: HarvestSchedule[] = [
 
 export function getHarvestScheduleById(id: string) {
   return harvestSchedules.find((schedule) => schedule.id === id);
+}
+
+export function toPurchaseScheduleContext(schedule: HarvestSchedule): PurchaseScheduleContext {
+  return {
+    scheduleId: schedule.id,
+    farmerId: schedule.farmerId,
+    fieldId: schedule.fieldId,
+    cycleId: schedule.cycleId,
+    farmerName: schedule.farmer,
+    fieldName: schedule.field,
+    commodity: schedule.commodity,
+  };
 }
 
 export function getHarvestScheduleDetail(id: string): HarvestScheduleDetail | undefined {
