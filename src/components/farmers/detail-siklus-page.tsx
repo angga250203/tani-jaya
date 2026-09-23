@@ -26,7 +26,7 @@ function methodLabel(method: HarvestCycle["defaultReceivingMethod"]) {
 }
 
 export function DetailSiklusPage({ farmerId, fieldId, cycleId, initialCycle }: { farmerId: string; fieldId: string; cycleId: string; initialCycle?: HarvestCycle }) {
-  const { endCycle: endCycleInStore, fields, records } = useFarmers();
+  const { endCycle: endCycleInStore, fields, records, error, isLoading } = useFarmers();
   const field = fields.find((item) => item.id === fieldId);
   const farmer = records.find((item) => item.id === farmerId);
   const cycle = field?.cycles.find((item) => item.id === cycleId) ?? initialCycle;
@@ -46,6 +46,8 @@ export function DetailSiklusPage({ farmerId, fieldId, cycleId, initialCycle }: {
   }, []);
 
   const history = useMemo(() => cycle?.harvestHistory ?? [], [cycle]);
+  if (isLoading) return <div className="px-4 py-6 text-sm text-tj-muted">Memuat data Siklus…</div>;
+  if (error) return <div className="px-4 py-6 text-sm text-tj-danger">{error}</div>;
   if (!field || !farmer || field.farmerId !== farmerId || !cycle) {
     return <div className="py-5"><ContentContainer><Card className="max-w-xl"><CardContent className="p-5"><h1 className="text-lg font-bold text-tj-text">Siklus tidak ditemukan</h1><Link className="mt-3 inline-flex text-sm font-semibold text-tj-primary hover:underline" href={`/petani/${farmerId}/lahan/${fieldId}`}>Kembali ke Detail Lahan</Link></CardContent></Card></ContentContainer></div>;
   }
@@ -54,10 +56,10 @@ export function DetailSiklusPage({ farmerId, fieldId, cycleId, initialCycle }: {
   const hasFirstHarvest = Boolean(cycle.firstHarvestAt);
   const basePath = `/petani/${farmerId}/lahan/${fieldId}/siklus/${cycle.id}`;
   const firstHarvestAction = `/transaksi/baru?siklus=${cycle.id}&panenPertama=true`;
-  const confirmEndCycle = () => {
-    endCycleInStore(fieldId, cycle.id);
+  const confirmEndCycle = async () => {
+    const result = await endCycleInStore(fieldId, cycle.id);
     setEndDialogOpen(false);
-    showToast("Siklus berhasil diakhiri.");
+    showToast(result.error ?? "Siklus berhasil diakhiri.");
   };
 
   return (

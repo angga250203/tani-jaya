@@ -1,8 +1,11 @@
 # Database foundation — Tani Jaya
 
-This document describes the Supabase/PostgreSQL foundation only. The current UI
-continues to use local mock providers. No page, query, or mock-data source has
-been switched to Supabase.
+This document describes the Supabase/PostgreSQL foundation and its current
+application integration. Petani, Lahan, Siklus Panen, and Jadwal Panen use the
+authenticated Supabase client as their source of truth; their UI maps typed
+database rows into the existing camelCase domain models. Other application
+modules continue to use their current local mock providers until their own
+integration phase.
 
 > **Sales + Stock status:** **APPLIED** through
 > `20260921084125_sales_stock_domain.sql`. The applied design follows
@@ -423,6 +426,86 @@ Direct table writes cannot safely enforce all cross-row stock and payment rules.
 The applied migration exposes narrow, Admin-authorized database operations
 rather than accepting independent browser writes to sale headers, lines,
 allocations, counters, and payments.
+
+## Applied Purchase atomic operations
+
+Migration `20260923044053_purchase_atomic_operations.sql` establishes the
+database boundary for Pembelian. It does not migrate the Purchase UI; that
+integration remains a later phase.
+
+### Purchase number allocation
+
+`purchase_number_counters` is internal infrastructure with one row per
+`operational_date`. `private.create_purchase` derives that date from the
+database clock in `Asia/Jakarta`, atomically increments the row with
+`INSERT ... ON CONFLICT ... UPDATE ... RETURNING`, then creates an immutable
+Purchase number:
+
+```text
+PB-YYYYMMDD-NNNN
+```
+
+For example, the first committed Purchase allocated on 23 September 2026 is
+`PB-20260923-0001`. The counter is never decremented by a correction or any
+future removal workflow, so committed numbers are never reused. The editable
+`transactions.transaction_date` is intentionally separate from the number's
+operational-date component.
+
+### Controlled Purchase RPCs
+
+Authenticated callers use only these public functions:
+
+```text
+public.create_purchase(p_payload jsonb)
+  returns table (transaction_id uuid, transaction_number text)
+
+public.update_purchase(p_transaction_id uuid, p_payload jsonb)
+  returns table (transaction_id uuid, transaction_number text)
+```
+
+The payload holds the existing header fields (`transaction_date`, optional
+`transaction_time`, `seller_type`, `farmer_id` or `seller_name_snapshot`,
+optional cycle/schedule context, `payment_status`, and `notes`) plus a nonempty
+`items` array. Each item holds `id` only when updating an existing row,
+`commodity`, `grade`, `weighing_method`, `gross_weight_kg`,
+`deduction_weight_kg`, `price_per_kg`, and `containers`. A container holds `id`
+only when retaining an existing container, `sequence_number`, and `weight_kg`;
+its database type is derived from the item's weighing method.
+
+Both operations execute as one PostgreSQL transaction. Create validates the
+Admin, header, items, counter allocation, header insert, all item inserts,
+appropriate container inserts, and final persisted totals before returning.
+Any failure rolls back the number allocation and every inserted row. The
+existing item trigger remains the sole writer of audited transaction totals;
+the RPC verifies those totals after persistence rather than accepting a client
+total.
+
+Validation requires a valid farmer for `partner_farmer`, a nonempty snapshot
+and no farmer/cycle/schedule for `general_seller`, and `paid` status for a
+general seller. Grade is exactly `SP`, `TG`, or `BR`; money and weight payload
+values are JSON whole numbers; deductions are from zero through gross weight;
+and price is non-negative. `direct_total` requires no container rows, while
+`per_sack` and `per_crate` require positive individual containers whose sum is
+exactly the item gross physical weight. Purchase net weight and value continue
+to be derived separately from physical gross stock.
+
+`update_purchase` locks the Purchase, its items, and its containers before
+changing them. It rejects `PURCHASE_FINALIZED_TOTALAN` when the Purchase is in
+a finalized Totalan. An item with retained `sale_stock_allocations` history
+cannot be deleted or have its commodity, grade, weighing method, gross physical
+weight, or container composition changed; seller identity is similarly locked
+for a Purchase with any such history. Financial item fields can still be
+changed when no finalized Totalan applies. Unused items and their containers
+may be added, replaced, or removed atomically. `transaction_number` is never
+updated or regenerated.
+
+The private implementation functions are `SECURITY DEFINER` with an empty
+explicit search path and call the existing `private.require_current_admin()`
+authorization guard. Public wrappers are executable only by `authenticated`;
+`anon` has no grants. The counter has RLS and no direct client grants. Direct
+Purchase `INSERT`, `UPDATE`, and `DELETE` grants have been revoked from
+`authenticated`, so RLS policies cannot be used to bypass the controlled
+mutation rules; Admin read access remains governed by the existing model.
 
 | Operation | Required atomic work |
 |---|---|

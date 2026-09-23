@@ -1,8 +1,9 @@
 "use client";
 
+import { useFarmers } from "@/components/farmers/farmers-provider";
+import { formatDateId } from "@/lib/master-data";
 import { DetailJadwalPanenPage } from "./detail-jadwal-panen-page";
 import { useSchedules } from "./schedules-provider";
-import { getHarvestScheduleDetail } from "@/lib/harvest-schedules";
 
 function addDays(dateISO: string, days: number) {
   const date = new Date(`${dateISO}T00:00:00Z`);
@@ -11,21 +12,23 @@ function addDays(dateISO: string, days: number) {
 }
 
 export function ScheduleDetailLoader({ scheduleId }: { scheduleId: string }) {
-  const { schedules } = useSchedules();
-  const staticDetail = getHarvestScheduleDetail(scheduleId);
-  const localSchedule = schedules.find((schedule) => schedule.id === scheduleId);
-  const schedule = localSchedule
-    ? {
-        ...staticDetail,
-        ...localSchedule,
-        intervalDays: staticDetail?.intervalDays ?? 7,
-        landmark: staticDetail?.landmark ?? "Patokan kebun petani",
-        note: staticDetail?.note ?? "Jadwal panen baru telah dicatat.",
-        nextDate: staticDetail?.nextDate ?? "—",
-        nextDateISO: addDays(localSchedule.dateISO, staticDetail?.intervalDays ?? 7),
-      }
-    : undefined;
+  const { fields, error: masterError, isLoading: masterLoading } = useFarmers();
+  const { schedules, error: schedulesError, isLoading: schedulesLoading } = useSchedules();
+  const schedule = schedules.find((item) => item.id === scheduleId);
+  const field = schedule ? fields.find((item) => item.id === schedule.fieldId) : undefined;
+  const cycle = field?.cycles.find((item) => item.id === schedule?.cycleId);
 
-  if (!schedule) return <p className="px-4 py-6 text-sm text-tj-muted">Jadwal tidak ditemukan.</p>;
-  return <DetailJadwalPanenPage key={schedule.id} schedule={schedule} />;
+  if (masterLoading || schedulesLoading) return <p className="px-4 py-6 text-sm text-tj-muted">Memuat detail Jadwal Panen…</p>;
+  if (masterError || schedulesError) return <p className="px-4 py-6 text-sm text-tj-danger">{masterError ?? schedulesError}</p>;
+  if (!schedule || !field || !cycle) return <p className="px-4 py-6 text-sm text-tj-muted">Jadwal tidak ditemukan.</p>;
+
+  const nextDateISO = addDays(schedule.dateISO, cycle.intervalDays);
+  return <DetailJadwalPanenPage key={schedule.id} schedule={{
+    ...schedule,
+    intervalDays: cycle.intervalDays,
+    landmark: field.landmark,
+    note: cycle.notes || "Jadwal panen mengikuti interval siklus yang telah disepakati.",
+    nextDate: formatDateId(nextDateISO) ?? nextDateISO,
+    nextDateISO,
+  }} />;
 }

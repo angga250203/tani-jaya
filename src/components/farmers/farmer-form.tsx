@@ -178,7 +178,7 @@ export function UnsavedChangesDialog({
 
 export function FarmerForm({ mode, farmerId, initialValues }: FarmerFormProps) {
   const router = useRouter();
-  const { createFarmer, records, updateFarmer } = useFarmers();
+  const { createFarmer, records, updateFarmer, error: providerError, isLoading } = useFarmers();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [leaveDialogOpen, setLeaveDialogOpen] = useState(false);
@@ -203,6 +203,11 @@ export function FarmerForm({ mode, farmerId, initialValues }: FarmerFormProps) {
     register,
     reset,
   } = methods;
+  useEffect(() => {
+    if (storedFarmer && !isDirty) {
+      reset({ name: storedFarmer.name, whatsapp: storedFarmer.whatsapp, landmark: storedFarmer.landmark, note: storedFarmer.note });
+    }
+  }, [isDirty, reset, storedFarmer]);
 
   useEffect(
     () => () => {
@@ -269,12 +274,22 @@ export function FarmerForm({ mode, farmerId, initialValues }: FarmerFormProps) {
     await new Promise<void>((resolve) => window.setTimeout(resolve, 450));
 
     if (mode === "create") {
-      createFarmer(values);
+      const result = await createFarmer(values);
+      if (result.error) {
+        showToast(result.error);
+        setIsSubmitting(false);
+        return;
+      }
       reset(values);
       showToast("Petani berhasil ditambahkan.");
       redirectTimerRef.current = setTimeout(() => router.push("/petani"), 700);
     } else if (farmerId) {
-      updateFarmer(farmerId, values);
+      const result = await updateFarmer(farmerId, values);
+      if (result.error) {
+        showToast(result.error);
+        setIsSubmitting(false);
+        return;
+      }
       reset(values);
       showToast("Data petani berhasil diperbarui.");
       redirectTimerRef.current = setTimeout(() => router.push(`/petani/${farmerId}`), 700);
@@ -287,6 +302,9 @@ export function FarmerForm({ mode, farmerId, initialValues }: FarmerFormProps) {
 
   const title = mode === "create" ? "Tambah Petani" : "Edit Petani";
   const submitLabel = mode === "create" ? "Simpan Petani" : "Simpan Perubahan";
+
+  if (isLoading) return <div className="px-4 py-6 text-sm text-tj-muted">Memuat data Petani…</div>;
+  if (providerError) return <div className="px-4 py-6 text-sm text-tj-danger">{providerError}</div>;
 
   if (mode === "edit" && !storedFarmer && !initialValues) {
     return (

@@ -28,7 +28,7 @@ type CycleFormProps = {
 
 export function CycleForm({ mode, farmerId, farmerName, fieldId, fieldName, cycleId, initialValues }: CycleFormProps) {
   const router = useRouter();
-  const { createCycle, fields, records, updateCycle } = useFarmers();
+  const { createCycle, fields, records, updateCycle, error: providerError, isLoading } = useFarmers();
   const storedFarmer = records.find((farmer) => farmer.id === farmerId);
   const storedField = fields.find((field) => field.id === fieldId);
   const storedCycle = storedField?.cycles.find((cycle) => cycle.id === cycleId);
@@ -45,6 +45,11 @@ export function CycleForm({ mode, farmerId, farmerName, fieldId, fieldName, cycl
     resolver: zodResolver(cycleFormSchema),
   });
   const { clearErrors, formState: { errors, isDirty }, handleSubmit, register, reset, setError } = methods;
+  useEffect(() => {
+    if (storedCycle && !isDirty) {
+      reset({ commodity: storedCycle.commodity, intervalDays: storedCycle.intervalDays, defaultReceivingMethod: storedCycle.defaultReceivingMethod, notes: storedCycle.notes });
+    }
+  }, [isDirty, reset, storedCycle]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [leaveDialogOpen, setLeaveDialogOpen] = useState(false);
@@ -103,22 +108,27 @@ export function CycleForm({ mode, farmerId, farmerName, fieldId, fieldName, cycl
     await new Promise<void>((resolve) => window.setTimeout(resolve, 450));
 
     if (mode === "create") {
-      const result = createCycle(fieldId, values);
+      const result = await createCycle(fieldId, values);
       if (result.error) {
         setError("commodity", { message: result.error });
         setIsSubmitting(false);
         return;
       }
-      if (result.cycle) {
+      if (result.data) {
         reset(values);
         showToast("Siklus berhasil ditambahkan.");
-        redirectTimerRef.current = setTimeout(() => router.push(`/petani/${farmerId}/lahan/${fieldId}/siklus/${result.cycle?.id}`), 700);
+        redirectTimerRef.current = setTimeout(() => router.push(`/petani/${farmerId}/lahan/${fieldId}/siklus/${result.data?.id}`), 700);
       }
       return;
     }
 
     if (cycleId) {
-      updateCycle(fieldId, cycleId, values as CycleEditValues);
+      const result = await updateCycle(fieldId, cycleId, values as CycleEditValues);
+      if (result.error) {
+        setError("notes", { message: result.error });
+        setIsSubmitting(false);
+        return;
+      }
       reset(values);
       showToast("Konfigurasi siklus berhasil diperbarui.");
       redirectTimerRef.current = setTimeout(() => router.push(detailPath), 700);
@@ -131,6 +141,9 @@ export function CycleForm({ mode, farmerId, farmerName, fieldId, fieldName, cycl
 
   const title = mode === "create" ? "Tambah Siklus" : "Edit Siklus";
   const submitLabel = mode === "create" ? "Simpan Siklus" : "Simpan Perubahan";
+
+  if (isLoading) return <div className="px-4 py-6 text-sm text-tj-muted">Memuat data Siklus…</div>;
+  if (providerError) return <div className="px-4 py-6 text-sm text-tj-danger">{providerError}</div>;
 
   if (!storedFarmer || !storedField || storedField.farmerId !== farmerId || (mode === "edit" && !storedCycle)) {
     return (

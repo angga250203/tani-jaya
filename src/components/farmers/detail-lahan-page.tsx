@@ -21,11 +21,14 @@ function CycleCard({ cycle, href }: { cycle: HarvestCycle; href: string }) {
 }
 
 export function DetailLahanPage({ farmerId, fieldId, initialField }: { farmerId: string; fieldId: string; initialField?: FieldRecord }) {
-  const { fields, records } = useFarmers();
+  const { fields, records, error, isLoading } = useFarmers();
   const field = fields.find((item) => item.id === fieldId) ?? initialField;
   const farmer = records.find((item) => item.id === farmerId);
   const activeCycles = useMemo(() => field?.cycles.filter((cycle) => cycle.status === "active") ?? [], [field]);
   const historyCycles = useMemo(() => field?.cycles.filter((cycle) => cycle.status === "completed") ?? [], [field]);
+
+  if (isLoading) return <div className="px-4 py-6 text-sm text-tj-muted">Memuat data Lahan…</div>;
+  if (error) return <div className="px-4 py-6 text-sm text-tj-danger">{error}</div>;
 
   if (!field || !farmer || field.farmerId !== farmerId) {
     return <div className="py-5"><ContentContainer><Card className="max-w-xl"><CardContent className="p-5"><h1 className="text-lg font-bold text-tj-text">Lahan tidak ditemukan</h1><Link className="mt-3 inline-flex text-sm font-semibold text-tj-primary hover:underline" href={`/petani/${farmerId}`}>Kembali ke Detail Petani</Link></CardContent></Card></ContentContainer></div>;

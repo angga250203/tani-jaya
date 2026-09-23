@@ -24,7 +24,7 @@ type LahanFormProps = {
 
 export function LahanForm({ mode, farmerId, farmerName, fieldId, initialValues }: LahanFormProps) {
   const router = useRouter();
-  const { createField, fields, records, updateField } = useFarmers();
+  const { createField, fields, records, updateField, error: providerError, isLoading } = useFarmers();
   const storedFarmer = records.find((farmer) => farmer.id === farmerId);
   const storedField = fieldId ? fields.find((field) => field.id === fieldId) : undefined;
   const resolvedFarmerName = storedFarmer?.name ?? farmerName ?? "Petani";
@@ -40,6 +40,11 @@ export function LahanForm({ mode, farmerId, farmerName, fieldId, initialValues }
     register,
     reset,
   } = methods;
+  useEffect(() => {
+    if (storedField && !isDirty) {
+      reset({ name: storedField.name, landmark: storedField.landmark, note: storedField.note });
+    }
+  }, [isDirty, reset, storedField]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [leaveDialogOpen, setLeaveDialogOpen] = useState(false);
@@ -104,12 +109,23 @@ export function LahanForm({ mode, farmerId, farmerName, fieldId, initialValues }
     await new Promise<void>((resolve) => window.setTimeout(resolve, 450));
 
     if (mode === "create") {
-      const newField = createField(farmerId, values);
+      const result = await createField(farmerId, values);
+      if (result.error || !result.data) {
+        showToast(result.error ?? "Lahan belum dapat disimpan.");
+        setIsSubmitting(false);
+        return;
+      }
+      const newField = result.data;
       reset(values);
       showToast("Lahan berhasil ditambahkan.");
       redirectTimerRef.current = setTimeout(() => router.push(`/petani/${farmerId}/lahan/${newField.id}`), 700);
     } else if (fieldId) {
-      updateField(fieldId, values);
+      const result = await updateField(fieldId, values);
+      if (result.error) {
+        showToast(result.error);
+        setIsSubmitting(false);
+        return;
+      }
       reset(values);
       showToast("Data lahan berhasil diperbarui.");
       redirectTimerRef.current = setTimeout(() => router.push(`/petani/${farmerId}/lahan/${fieldId}`), 700);
@@ -122,6 +138,9 @@ export function LahanForm({ mode, farmerId, farmerName, fieldId, initialValues }
 
   const title = mode === "create" ? "Tambah Lahan" : "Edit Lahan";
   const submitLabel = mode === "create" ? "Simpan Lahan" : "Simpan Perubahan";
+
+  if (isLoading) return <div className="px-4 py-6 text-sm text-tj-muted">Memuat data Lahan…</div>;
+  if (providerError) return <div className="px-4 py-6 text-sm text-tj-danger">{providerError}</div>;
 
   if (!storedFarmer || (mode === "edit" && (!storedField || storedField.farmerId !== farmerId))) {
     return (

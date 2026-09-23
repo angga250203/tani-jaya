@@ -139,7 +139,7 @@ function EmptyFarmers({ hasFilter }: { hasFilter: boolean }) {
 }
 
 export function PetaniPage() {
-  const { records } = useFarmers();
+  const { records, error, isLoading, refresh } = useFarmers();
   const [filter, setFilter] = useState<FarmerFilter>("all");
   const [query, setQuery] = useState("");
   const reduceMotion = useReducedMotion();
@@ -158,6 +158,8 @@ export function PetaniPage() {
   }, [filter, query, records]);
 
   const hasFilter = Boolean(query.trim()) || filter !== "all";
+  if (isLoading) return <div className="px-4 py-6 text-sm text-tj-muted">Memuat data Petani…</div>;
+  if (error) return <div className="px-4 py-6 text-sm text-tj-danger"><p>{error}</p><button className="mt-3 font-semibold text-tj-primary hover:underline" onClick={() => void refresh()} type="button">Coba lagi</button></div>;
 
   return (
     <div className="py-5 sm:py-6 lg:py-8">

@@ -300,18 +300,26 @@ export function DetailJadwalPanenPage({
     }, 2800);
   };
 
-  const savePostpone = () => {
+  const savePostpone = async () => {
+    const result = await postponeSchedule(schedule.id, pendingDate);
+    setDialog(null);
+    if (result.error) {
+      showToast(result.error);
+      return;
+    }
     setScheduleDateISO(pendingDate);
     setNextDateISO(addDays(pendingDate, schedule.intervalDays));
-    postponeSchedule(schedule.id, pendingDate);
-    setDialog(null);
     showToast("Jadwal panen berhasil diperbarui.");
   };
 
-  const saveMethod = () => {
-    setMethod(pendingMethod);
-    updateReceivingMethod(schedule.id, pendingMethod, methodScope);
+  const saveMethod = async () => {
+    const result = await updateReceivingMethod(schedule.id, pendingMethod, methodScope);
     setDialog(null);
+    if (result.error) {
+      showToast(result.error);
+      return;
+    }
+    setMethod(pendingMethod);
     showToast(
       methodScope === "single"
         ? "Metode penerimaan untuk jadwal ini berhasil diubah."

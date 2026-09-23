@@ -32,7 +32,7 @@ import { useKasbons } from "@/components/kasbons/kasbons-provider";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { StatusBadge } from "@/components/ui/status-badge";
-import type { FarmerDetail, FarmerStatus } from "@/lib/farmers";
+import type { FarmerStatus, FarmerTransaction } from "@/lib/farmers";
 import { cn, formatRupiah } from "@/lib/utils";
 
 function FarmerStatusBadge({ status }: { status: FarmerStatus }) {
@@ -221,21 +221,24 @@ function SummaryCard({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function DetailPetaniPage({ farmer: initialFarmer }: { farmer: FarmerDetail }) {
-  const { records, fields, updateFarmer } = useFarmers();
+export function DetailPetaniPage({ farmerId }: { farmerId: string }) {
+  const { records, fields, updateFarmer, isLoading, error } = useFarmers();
   const { transactions } = useTransactions();
   const { getBalance } = useKasbons();
-  const farmer = useMemo(() => ({
-    ...initialFarmer,
-    ...records.find((record) => record.id === initialFarmer.id),
-  }), [initialFarmer, records]);
-  const status = farmer.status;
-  const kasbonBalance = getBalance(farmer.id);
-  const farmerFields = fields.filter((field) => field.farmerId === farmer.id);
+  const storedFarmer = records.find((record) => record.id === farmerId);
+  const farmer = useMemo(() => storedFarmer ? ({
+    ...storedFarmer,
+    gardenDescription: storedFarmer.landmark,
+    monthlyTransactionCount: 0,
+    recentTransactions: [] as FarmerTransaction[],
+  }) : undefined, [storedFarmer]);
+  const status = farmer?.status ?? "active";
+  const kasbonBalance = getBalance(farmerId);
+  const farmerFields = fields.filter((field) => field.farmerId === farmerId);
   const activeCycleCount = farmerFields.flatMap((field) => field.cycles).filter((cycle) => cycle.status === "active").length;
   const eligibleTotalanCount = transactions.filter((transaction) => (
     transaction.sellerType === "PETANI_MITRA"
-    && transaction.farmerId === farmer.id
+    && transaction.farmerId === farmerId
     && transaction.paymentStatus === "UNPAID"
     && !transaction.totalanId
   )).length;
@@ -265,12 +268,22 @@ export function DetailPetaniPage({ farmer: initialFarmer }: { farmer: FarmerDeta
     }, 2800);
   };
 
-  const confirmStatusChange = () => {
+  const confirmStatusChange = async () => {
+    if (!farmer) return;
     const nextStatus: FarmerStatus = status === "active" ? "inactive" : "active";
-    updateFarmer(farmer.id, { status: nextStatus });
+    const result = await updateFarmer(farmer.id, { status: nextStatus });
+    if (result.error) {
+      closeStatusDialog();
+      showToast(result.error);
+      return;
+    }
     closeStatusDialog();
     showToast(nextStatus === "active" ? `${farmer.name} kembali aktif.` : `${farmer.name} dinonaktifkan.`);
   };
+
+  if (isLoading) return <div className="px-4 py-6 text-sm text-tj-muted">Memuat data Petani…</div>;
+  if (error) return <div className="px-4 py-6 text-sm text-tj-danger">{error}</div>;
+  if (!farmer) return <div className="px-4 py-6 text-sm text-tj-muted">Petani tidak ditemukan.</div>;
 
   return (
     <div className="py-5 sm:py-6 lg:py-8">

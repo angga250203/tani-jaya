@@ -303,6 +303,27 @@ export type Database = {
           },
         ]
       }
+      purchase_number_counters: {
+        Row: {
+          created_at: string
+          last_sequence: number
+          operational_date: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          last_sequence?: number
+          operational_date: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          last_sequence?: number
+          operational_date?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       sale_change_events: {
         Row: {
           created_at: string
@@ -1018,6 +1039,13 @@ export type Database = {
         }
         Returns: string
       }
+      create_purchase: {
+        Args: { p_payload: Json }
+        Returns: {
+          transaction_id: string
+          transaction_number: string
+        }[]
+      }
       create_sale: {
         Args: {
           p_buyer_name: string
@@ -1039,6 +1067,13 @@ export type Database = {
       record_sale_payment: {
         Args: { p_amount: number; p_payment_date: string; p_sale_id: string }
         Returns: string
+      }
+      update_purchase: {
+        Args: { p_payload: Json; p_transaction_id: string }
+        Returns: {
+          transaction_id: string
+          transaction_number: string
+        }[]
       }
     }
     Enums: {
