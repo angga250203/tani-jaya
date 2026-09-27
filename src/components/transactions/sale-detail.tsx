@@ -9,7 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { buyerTypeLabel, deriveSaleTotals, formatSaleDate, jakartaOperationalDate, saleDeliveryLabel, type SaleItem, type SaleRecord } from "@/lib/sales";
+import { getOperationalDateISO } from "@/lib/operational-date";
+import { buyerTypeLabel, deriveSaleTotals, formatSaleDate, saleDeliveryLabel, type SaleItem, type SaleRecord } from "@/lib/sales";
 import { cn, formatRupiah } from "@/lib/utils";
 import { useSales } from "./sales-provider";
 
@@ -118,7 +119,7 @@ export function SaleDetail({ saleId }: { saleId: string }) {
   const expeditionCost = sale.deliveryMethod === "EXPEDITION" ? totals.totalGrossWeightKg * (sale.expeditionRatePerKg ?? 0) : 0;
 
   const recordPayment = async (amount: number) => {
-    const today = jakartaOperationalDate();
+    const today = getOperationalDateISO();
     const result = await recordSalePayment(sale.id, amount, today);
     if (result.error) return result.error;
     setDialogMode(null);

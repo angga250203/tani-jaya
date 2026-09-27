@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import type { Farmer } from "@/lib/farmers";
 import { useFarmers } from "@/components/farmers/farmers-provider";
 import { emptyNumericValue, toOptionalInteger } from "@/lib/form-numbers";
+import { getOperationalDateISO } from "@/lib/operational-date";
 import { formatRupiah } from "@/lib/utils";
 import { kasbonFormSchema, type KasbonFormValues } from "@/lib/validations";
 
@@ -29,7 +30,7 @@ export function KasbonForm({ farmerId, initialFarmer }: { farmerId: string; init
   const [toast, setToast] = useState<string | null>(null);
   const redirectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { control, formState: { errors }, handleSubmit, register } = useForm<KasbonFormValues>({
-    defaultValues: { date: "2026-09-16", amount: emptyNumericValue, note: "" },
+    defaultValues: { date: getOperationalDateISO(), amount: emptyNumericValue, note: "" },
     resolver: zodResolver(kasbonFormSchema),
   });
   const amount = useWatch({ control, name: "amount" }) ?? 0;

@@ -15,6 +15,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input, SelectField } from "@/components/ui/input";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { emptyNumericValue, toOptionalInteger } from "@/lib/form-numbers";
+import { getOperationalDateISO } from "@/lib/operational-date";
 import { formatTransactionDate } from "@/lib/transactions";
 import { calculateFinalPayment, calculateSelectedNetWeight, calculateSelectedTransactionTotal } from "@/lib/totalans";
 import { cn, formatRupiah } from "@/lib/utils";
@@ -107,7 +108,7 @@ export function TotalanForm() {
   const finalize = async () => {
     if (!selectedFarmer || isFinalizing) return;
     setIsFinalizing(true);
-    const result = await finalizeTotalan({ farmerId: selectedFarmer.id, transactionIds: selectedIds, requestedKasbonDeduction, totalanDate: new Date().toISOString().slice(0, 10) });
+    const result = await finalizeTotalan({ farmerId: selectedFarmer.id, transactionIds: selectedIds, requestedKasbonDeduction, totalanDate: getOperationalDateISO() });
     if (result.error || !result.record) {
       setConfirmOpen(false);
       setFormError(result.error ?? "Totalan tidak dapat diselesaikan.");

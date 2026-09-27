@@ -866,6 +866,16 @@ to Purchase value again. Stock reporting is explicitly current stock state, not
 a reconstructed historical month-end balance. These pages have no analytics
 fixture fallback.
 
+## Deployment readiness
+
+Install dependencies with `npm ci`, configure the browser-safe
+`NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` values,
+then run `npm run build` and start the resulting Next.js application with the
+standard production command. The linked Supabase project must have every local
+migration applied and at least one authenticated user listed in `public.app_admins`.
+No service-role key is required by the application runtime; `.env.local` remains
+local-only and `.env.example` contains placeholders only.
+
 ## PRD ambiguities retained for the next phase
 
 - The PRD mentions estimated harvest count in a flow, but the current UI types

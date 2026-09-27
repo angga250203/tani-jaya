@@ -8,6 +8,7 @@ import { ContentContainer } from "@/components/layout/content-container";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input, SelectField } from "@/components/ui/input";
+import { getOperationalDateISO } from "@/lib/operational-date";
 import { useSchedules } from "./schedules-provider";
 
 export function ScheduleForm() {
@@ -17,7 +18,7 @@ export function ScheduleForm() {
   const [farmerId, setFarmerId] = useState("");
   const [fieldId, setFieldId] = useState("");
   const [cycleId, setCycleId] = useState("");
-  const [dateISO, setDateISO] = useState("2026-09-16");
+  const [dateISO, setDateISO] = useState(() => getOperationalDateISO());
   const [method, setMethod] = useState<"Diambil" | "Diantar">("Diambil");
   const [saved, setSaved] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);

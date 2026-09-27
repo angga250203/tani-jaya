@@ -1,7 +1,7 @@
 import type { Farmer, FarmerStatus } from "@/lib/farmers";
 import type { FieldRecord, HarvestCycle, HarvestCycleStatus, ReceivingMethod } from "@/lib/fields";
 import type { HarvestSchedule, HarvestScheduleStatus } from "@/lib/harvest-schedules";
-import { operationalDateISO } from "@/lib/operational-date";
+import { getOperationalDateISO } from "@/lib/operational-date";
 import type { Database } from "@/types/database.types";
 
 type FarmerRow = Database["public"]["Tables"]["farmers"]["Row"];
@@ -55,7 +55,7 @@ export function scheduleStatus(dateISO: string): {
   status: HarvestScheduleStatus;
   statusLabel: HarvestSchedule["statusLabel"];
 } {
-  const operationalDate = operationalDateISO;
+  const operationalDate = getOperationalDateISO();
   if (dateISO < operationalDate) return { status: "warning", statusLabel: "Terlambat" };
   if (dateISO === operationalDate) return { status: "today", statusLabel: "Hari Ini" };
   return { status: "upcoming", statusLabel: "Akan Datang" };

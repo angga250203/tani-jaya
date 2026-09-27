@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import type { Farmer, FarmerStatus } from "@/lib/farmers";
 import type { FieldRecord, HarvestCycle } from "@/lib/fields";
 import { toMasterData, toSupabaseErrorMessage } from "@/lib/master-data";
+import { getOperationalDateISO } from "@/lib/operational-date";
 import { createClient } from "@/lib/supabase/client";
 import type { CycleEditValues, CycleFormValues, FarmerFormValues, FieldFormValues } from "@/lib/validations";
 
@@ -123,7 +124,7 @@ export function FarmersProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   const endCycle = useCallback(async (fieldId: string, cycleId: string): Promise<MutationResult<HarvestCycle>> => {
-    const { data, error: updateError } = await createClient().from("harvest_cycles").update({ status: "completed", ended_at: new Date().toISOString().slice(0, 10) }).eq("id", cycleId).eq("field_id", fieldId).select().single();
+    const { data, error: updateError } = await createClient().from("harvest_cycles").update({ status: "completed", ended_at: getOperationalDateISO() }).eq("id", cycleId).eq("field_id", fieldId).select().single();
     if (updateError || !data) return { error: toSupabaseErrorMessage(updateError) };
     const cycle: HarvestCycle = { id: data.id, commodity: data.commodity, status: "completed", intervalDays: data.harvest_interval_days, defaultReceivingMethod: data.default_receiving_method === "delivered" ? "DIANTAR" : "DIAMBIL", createdAt: data.created_at, notes: data.notes, harvestHistory: [] };
     return await refresh() ? { data: cycle } : { error: "Siklus diakhiri, tetapi data belum dapat dimuat ulang." };

@@ -14,15 +14,15 @@ import { SelectField } from "@/components/ui/input";
 import { getMonthlyReport, monthLabel } from "@/lib/monthly-report";
 import { deriveSaleTotals } from "@/lib/sales";
 import { formatRupiah } from "@/lib/utils";
-import { operationalDateISO } from "@/lib/operational-date";
+import { getOperationalDateISO } from "@/lib/operational-date";
 
 function Metric({ label, value, icon: Icon }: { label: string; value: string; icon: typeof Scale }) { return <Card><CardContent className="p-4"><div className="flex justify-between gap-3"><div><p className="text-xs text-tj-muted">{label}</p><p className="mt-2 text-lg font-bold tracking-[-0.02em] text-tj-primary-strong">{value}</p></div><Icon aria-hidden="true" className="text-tj-primary" size={20} /></div></CardContent></Card>; }
 function Section({ title, children }: { title: string; children: React.ReactNode }) { return <Card><CardContent className="p-4 lg:p-5"><h2 className="text-base font-bold text-tj-text">{title}</h2>{children}</CardContent></Card>; }
 function Row({ label, value }: { label: string; value: string }) { return <div className="flex items-start justify-between gap-4 py-2.5 text-sm"><dt className="text-tj-muted">{label}</dt><dd className="text-right font-bold text-tj-text">{value}</dd></div>; }
 
 export function MonthlyReportPage() {
-  const { transactions, isLoading: purchasesLoading, error: purchasesError } = useTransactions(); const { sales, isLoading: salesLoading, error: salesError } = useSales(); const { totalans, isLoading: totalansLoading, error: totalansError } = useTotalans(); const { entries, isLoading: kasbonsLoading, error: kasbonsError } = useKasbons(); const [month, setMonth] = useState(operationalDateISO.slice(0, 7));
-  const reportMonths = useMemo(() => [...new Set([operationalDateISO.slice(0, 7), ...transactions.map((row) => row.transactionDate.slice(0, 7)), ...sales.map((row) => row.saleDate.slice(0, 7)), ...totalans.map((row) => row.totalanDate.slice(0, 7)), ...entries.map((row) => row.date.slice(0, 7))])].sort(), [entries, sales, totalans, transactions]);
+  const { transactions, isLoading: purchasesLoading, error: purchasesError } = useTransactions(); const { sales, isLoading: salesLoading, error: salesError } = useSales(); const { totalans, isLoading: totalansLoading, error: totalansError } = useTotalans(); const { entries, isLoading: kasbonsLoading, error: kasbonsError } = useKasbons(); const operationalMonth = getOperationalDateISO().slice(0, 7); const [month, setMonth] = useState(operationalMonth);
+  const reportMonths = useMemo(() => [...new Set([operationalMonth, ...transactions.map((row) => row.transactionDate.slice(0, 7)), ...sales.map((row) => row.saleDate.slice(0, 7)), ...totalans.map((row) => row.totalanDate.slice(0, 7)), ...entries.map((row) => row.date.slice(0, 7))])].sort(), [entries, operationalMonth, sales, totalans, transactions]);
   const purchase = useMemo(() => getMonthlyReport(month, transactions, totalans, entries), [entries, month, totalans, transactions]);
   const salesReport = useMemo(() => {
     const historical = sales.filter((sale) => sale.saleDate.startsWith(month)); const active = historical.filter((sale) => sale.lifecycleStatus === "ACTIVE");

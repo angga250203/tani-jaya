@@ -1,5 +1,18 @@
-/** The fixed operational date keeps the local demo data deterministic. */
-export const operationalDateISO = "2026-09-16";
+const jakartaDateFormatter = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Jakarta",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+/** Returns the current business date in Asia/Jakarta as YYYY-MM-DD. */
+export function getOperationalDateISO(now = new Date()) {
+  const parts = jakartaDateFormatter
+    .formatToParts(now)
+    .reduce<Record<string, string>>((result, part) => ({ ...result, [part.type]: part.value }), {});
+
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
 
 function parseISODate(dateISO: string) {
   return new Date(`${dateISO}T00:00:00Z`);
@@ -15,16 +28,16 @@ export function addCalendarDays(dateISO: string, days: number) {
   return toISODate(date);
 }
 
-export function isSameOperationalDay(dateISO: string, offset = 0) {
-  return dateISO === addCalendarDays(operationalDateISO, offset);
+export function isSameOperationalDay(dateISO: string, offset = 0, operationalDate = getOperationalDateISO()) {
+  return dateISO === addCalendarDays(operationalDate, offset);
 }
 
-export function isAfterOperationalTomorrow(dateISO: string) {
-  return parseISODate(dateISO).getTime() > parseISODate(addCalendarDays(operationalDateISO, 1)).getTime();
+export function isAfterOperationalTomorrow(dateISO: string, operationalDate = getOperationalDateISO()) {
+  return parseISODate(dateISO).getTime() > parseISODate(addCalendarDays(operationalDate, 1)).getTime();
 }
 
-export function isInOperationalWeek(dateISO: string) {
-  const current = parseISODate(operationalDateISO);
+export function isInOperationalWeek(dateISO: string, operationalDate = getOperationalDateISO()) {
+  const current = parseISODate(operationalDate);
   const mondayOffset = (current.getUTCDay() + 6) % 7;
   const weekStart = new Date(current);
   weekStart.setUTCDate(current.getUTCDate() - mondayOffset);

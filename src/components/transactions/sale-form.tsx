@@ -10,8 +10,9 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input, SelectField } from "@/components/ui/input";
 import { useStocks } from "@/components/stocks/stocks-provider";
+import { getOperationalDateISO } from "@/lib/operational-date";
 import { gradeLabels } from "@/lib/stocks";
-import { jakartaOperationalDate, type BuyerType, type SaleCreateInput, type SaleStockAllocation, type SaleDeliveryMethod, type SaleItem } from "@/lib/sales";
+import { type BuyerType, type SaleCreateInput, type SaleStockAllocation, type SaleDeliveryMethod, type SaleItem } from "@/lib/sales";
 import { cn, formatRupiah } from "@/lib/utils";
 import { SaleStockPicker } from "./sale-stock-picker";
 import { useSales } from "./sales-provider";
@@ -111,7 +112,7 @@ export function SaleForm() {
 
   const submit = async () => {
     if (isSubmitting || !validate()) return;
-    const saleDate = jakartaOperationalDate();
+    const saleDate = getOperationalDateISO();
     const input: SaleCreateInput = { saleDate, buyerName, buyerType: buyerType as BuyerType, deliveryMethod, expeditionName: deliveryMethod === "EXPEDITION" ? expeditionName : undefined, expeditionRatePerKg: deliveryMethod === "EXPEDITION" ? totals.rate ?? undefined : undefined, allocations, items: calculatedItems.map((item) => ({ commodity: item.commodity, grade: item.grade, grossWeightKg: item.grossWeightKg, deductionWeightKg: item.deductionWeightKg, netWeightKg: item.netWeightKg, pricePerKg: item.enteredPrice ?? 0, subtotal: item.subtotal })), initialPayment: totals.initialPayment };
     setIsSubmitting(true);
     const result = await createSale(input);

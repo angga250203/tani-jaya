@@ -136,11 +136,4 @@ export function saleCommoditySummary(items: SaleItem[]) {
 export function saleDeliveryLabel(method: SaleDeliveryMethod) { return method === "EXPEDITION" ? "Ekspedisi" : "Diambil Pembeli"; }
 export function buyerTypeLabel(type: BuyerType) { return type === "MARKET" ? "Pasar" : type === "WEIGHER_COLLECTOR" ? "Penimbang/Pengepul" : "Pembeli Umum"; }
 export function formatSaleDate(date: string) { return new Intl.DateTimeFormat("id-ID", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`)); }
-/** ISO operational date in Asia/Jakarta for database date parameters. */
-export function jakartaOperationalDate(date = new Date()) {
-  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit" })
-    .formatToParts(date)
-    .reduce<Record<string, string>>((result, part) => ({ ...result, [part.type]: part.value }), {});
-  return `${parts.year}-${parts.month}-${parts.day}`;
-}
 export function sortSalesNewest(sales: SaleRecord[]) { return [...sales].sort((a, b) => b.saleDate.localeCompare(a.saleDate) || b.saleNumber.localeCompare(a.saleNumber)); }

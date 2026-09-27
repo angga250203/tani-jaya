@@ -14,7 +14,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { deriveSaleTotals, formatSaleDate, saleCommoditySummary, sortSalesNewest, type SaleRecord } from "@/lib/sales";
 import { stockSummary } from "@/lib/stocks";
-import { isSameOperationalDay, operationalDateISO } from "@/lib/operational-date";
+import { getOperationalDateISO, isSameOperationalDay } from "@/lib/operational-date";
 import { paymentStatusLabel, sellerTypeLabel, type TransactionRecord } from "@/lib/transactions";
 import { cn, formatRupiah } from "@/lib/utils";
 
@@ -44,13 +44,14 @@ export function DashboardPage() {
   const { transactions, isLoading: purchasesLoading, error: purchasesError } = useTransactions();
   const reduceMotion = useReducedMotion();
   const [selection, setSelection] = useState<ActivitySelection>("HARVEST_TODAY");
-  const todayPurchases = useMemo(() => transactions.filter((transaction) => transaction.transactionDate === operationalDateISO), [transactions]);
-  const todaySales = useMemo(() => sales.filter((sale) => sale.saleDate === operationalDateISO && sale.lifecycleStatus === "ACTIVE"), [sales]);
+  const operationalDate = getOperationalDateISO();
+  const todayPurchases = useMemo(() => transactions.filter((transaction) => transaction.transactionDate === operationalDate), [operationalDate, transactions]);
+  const todaySales = useMemo(() => sales.filter((sale) => sale.saleDate === operationalDate && sale.lifecycleStatus === "ACTIVE"), [operationalDate, sales]);
   const activeSales = useMemo(() => sales.filter((sale) => sale.lifecycleStatus === "ACTIVE"), [sales]);
   const receivable = useMemo(() => activeSales.reduce((total, sale) => total + deriveSaleTotals(sale).remainingBalance, 0), [activeSales]);
   const availableStock = useMemo(() => stockSummary(sources).totalAvailableWeightKg, [sources]);
-  const todaySchedules = useMemo(() => schedules.filter((schedule) => isSameOperationalDay(schedule.dateISO)), [schedules]);
-  const tomorrowSchedules = useMemo(() => schedules.filter((schedule) => isSameOperationalDay(schedule.dateISO, 1)), [schedules]);
+  const todaySchedules = useMemo(() => schedules.filter((schedule) => isSameOperationalDay(schedule.dateISO, 0, operationalDate)), [operationalDate, schedules]);
+  const tomorrowSchedules = useMemo(() => schedules.filter((schedule) => isSameOperationalDay(schedule.dateISO, 1, operationalDate)), [operationalDate, schedules]);
   const activity = selection === "HARVEST_TODAY" ? todaySchedules : selection === "HARVEST_TOMORROW" ? tomorrowSchedules : selection === "PURCHASES" ? todayPurchases : sortSalesNewest(todaySales);
   const labels: Record<ActivitySelection, { title: string; subtitle: string; href: string; action: string }> = {
     HARVEST_TODAY: { title: "Panen hari ini", subtitle: `${todaySchedules.length} jadwal perlu ditindaklanjuti`, href: "/jadwal", action: "Lihat jadwal" },
