@@ -15,7 +15,7 @@ type TransactionsContextValue = {
   refresh: () => Promise<boolean>;
   createTransaction: (values: TransactionFormValues) => Promise<PurchaseMutationResult>;
   updateTransaction: (id: string, values: TransactionFormValues) => Promise<PurchaseMutationResult>;
-  /** Totalan remains a later migration phase. It must not mutate Supabase Purchases locally. */
+  /** Totalan is finalized by its own RPC and must never mutate Purchases locally. */
   settleTransactionsInTotalan: (transactionIds: string[], totalanId: string) => void;
 };
 
