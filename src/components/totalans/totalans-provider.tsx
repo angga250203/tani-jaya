@@ -1,97 +1,19 @@
 "use client";
-
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
-import { useTransactions } from "@/components/transactions/transactions-provider";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useKasbons } from "@/components/kasbons/kasbons-provider";
-import {
-  calculateFinalPayment,
-  calculateKasbonDeduction,
-  calculateSelectedNetWeight,
-  calculateSelectedTransactionTotal,
-  createIncludedTransaction,
-  initialTotalans,
-  type TotalanRecord,
-} from "@/lib/totalans";
-
-type FinalizeTotalanInput = {
-  farmerId: string;
-  farmerName: string;
-  transactionIds: string[];
-  requestedKasbonDeduction: number;
-};
-
-type FinalizeTotalanResult = { record?: TotalanRecord; error?: string };
-
-type TotalansContextValue = {
-  totalans: TotalanRecord[];
-  kasbonBalances: Record<string, number>;
-  isPurchaseFinanciallyLocked: (transactionId: string) => boolean;
-  finalizeTotalan: (input: FinalizeTotalanInput) => FinalizeTotalanResult;
-};
-
-const TotalansContext = createContext<TotalansContextValue | null>(null);
-
+import { readTotalans, type TotalanRecord } from "@/lib/totalans";
+import { createClient } from "@/lib/supabase/client";
+type Input = { farmerId: string; transactionIds: string[]; requestedKasbonDeduction: number; totalanDate: string };
+type Result = { record?: TotalanRecord; error?: string };
+type Value = { totalans: TotalanRecord[]; kasbonBalances: Record<string, number>; isLoading: boolean; error: string | null; refresh: () => Promise<boolean>; isPurchaseFinanciallyLocked: (transactionId: string) => boolean; finalizeTotalan: (input: Input) => Promise<Result> };
+const Context = createContext<Value | null>(null);
+function rpcMessage(error: { message: string }) { const source = error.message; if (source.includes("KASBON_INSUFFICIENT_BALANCE")) return "Potongan kasbon melebihi saldo kasbon saat ini."; if (source.includes("PURCHASE_ALREADY_IN_TOTALAN")) return "Salah satu transaksi baru saja masuk Totalan lain. Data telah diperbarui."; if (source.includes("TOTALAN_FARMER_MISMATCH")) return "Semua transaksi harus berasal dari petani yang sama."; if (source.includes("PURCHASE_NOT_ELIGIBLE")) return "Ada transaksi yang tidak lagi memenuhi syarat Totalan."; if (source.includes("INVALID_KASBON_DEDUCTION")) return "Potongan kasbon tidak valid."; return "Totalan belum dapat diselesaikan. Coba muat ulang data."; }
 export function TotalansProvider({ children }: { children: ReactNode }) {
-  const { settleTransactionsInTotalan, transactions } = useTransactions();
-  const { balances: kasbonBalances, recordTotalanDeduction } = useKasbons();
-  const [totalans, setTotalans] = useState(initialTotalans);
-
-  const finalizeTotalan = useCallback((input: FinalizeTotalanInput): FinalizeTotalanResult => {
-    const selectedTransactions = transactions.filter((transaction) => input.transactionIds.includes(transaction.id));
-    const allEligible = selectedTransactions.length === input.transactionIds.length
-      && selectedTransactions.every((transaction) => (
-        transaction.sellerType === "PETANI_MITRA"
-        && transaction.farmerId === input.farmerId
-        && transaction.paymentStatus === "UNPAID"
-        && !transaction.totalanId
-      ));
-
-    if (!input.farmerId) return { error: "Pilih petani terlebih dahulu." };
-    if (!input.transactionIds.length) return { error: "Pilih minimal satu transaksi." };
-    if (!allEligible) return { error: "Pilihan transaksi sudah tidak memenuhi syarat untuk totalan." };
-
-    const totalHarvestValue = calculateSelectedTransactionTotal(selectedTransactions);
-    const totalNetWeight = calculateSelectedNetWeight(selectedTransactions);
-    const kasbonBalance = kasbonBalances[input.farmerId] ?? 0;
-    const kasbonDeduction = calculateKasbonDeduction(input.requestedKasbonDeduction, kasbonBalance, totalHarvestValue);
-
-    if (kasbonDeduction !== input.requestedKasbonDeduction) {
-      return { error: "Potongan kasbon melebihi saldo kasbon atau total hasil panen." };
-    }
-
-    const id = `totalan-local-${Date.now()}`;
-    const record: TotalanRecord = {
-      id,
-      number: `TLN-2026-${String(totalans.length + 1).padStart(3, "0")}`,
-      totalanDate: "2026-09-16",
-      farmerId: input.farmerId,
-      farmerName: input.farmerName,
-      transactions: selectedTransactions.map(createIncludedTransaction),
-      totalTransactions: selectedTransactions.length,
-      totalNetWeight,
-      totalHarvestValue,
-      kasbonDeduction,
-      finalPayment: calculateFinalPayment(totalHarvestValue, kasbonDeduction),
-      status: "COMPLETED",
-    };
-
-    if (kasbonDeduction > 0 && !recordTotalanDeduction({ farmerId: input.farmerId, totalanId: id, date: record.totalanDate, amount: kasbonDeduction })) {
-      return { error: "Potongan kasbon tidak dapat dicatat pada riwayat." };
-    }
-    setTotalans((current) => [record, ...current]);
-    settleTransactionsInTotalan(input.transactionIds, id);
-    return { record };
-  }, [kasbonBalances, recordTotalanDeduction, settleTransactionsInTotalan, totalans.length, transactions]);
-
-  const isPurchaseFinanciallyLocked = useCallback((transactionId: string) => (
-    totalans.some((totalan) => totalan.status === "COMPLETED" && totalan.transactions.some((transaction) => transaction.transactionId === transactionId))
-  ), [totalans]);
-  const value = useMemo(() => ({ totalans, kasbonBalances, finalizeTotalan, isPurchaseFinanciallyLocked }), [finalizeTotalan, isPurchaseFinanciallyLocked, kasbonBalances, totalans]);
-  return <TotalansContext.Provider value={value}>{children}</TotalansContext.Provider>;
+  const { balances: kasbonBalances, refresh: refreshKasbons } = useKasbons(); const [totalans, setTotalans] = useState<TotalanRecord[]>([]); const [isLoading, setLoading] = useState(true); const [error, setError] = useState<string | null>(null);
+  const refresh = useCallback(async () => { setLoading(true); setError(null); const result = await readTotalans(createClient()); setLoading(false); if (result.error) { setError(result.error); return false; } setTotalans(result.data ?? []); return true; }, []);
+  useEffect(() => { void Promise.resolve().then(refresh); }, [refresh]);
+  const finalizeTotalan = useCallback(async (input: Input): Promise<Result> => { const { data, error: rpcError } = await createClient().rpc("finalize_totalan", { p_farmer_id: input.farmerId, p_transaction_ids: input.transactionIds, p_totalan_date: input.totalanDate, p_kasbon_deduction_amount: input.requestedKasbonDeduction }); if (rpcError) { await refresh(); return { error: rpcMessage(rpcError) }; } if (!data) return { error: "Totalan belum dapat diselesaikan." }; const [ok] = await Promise.all([refresh(), refreshKasbons()]); if (!ok) return { error: "Totalan tersimpan, tetapi data terbaru belum dapat dimuat." }; const record = (await readTotalans(createClient())).data?.find((row) => row.id === data); return record ? { record } : { error: "Totalan tersimpan, tetapi detail belum dapat dimuat." }; }, [refresh, refreshKasbons]);
+  const isPurchaseFinanciallyLocked = useCallback((transactionId: string) => totalans.some((totalan) => totalan.transactions.some((transaction) => transaction.transactionId === transactionId)), [totalans]);
+  const value = useMemo(() => ({ totalans, kasbonBalances, isLoading, error, refresh, isPurchaseFinanciallyLocked, finalizeTotalan }), [error, finalizeTotalan, isLoading, isPurchaseFinanciallyLocked, kasbonBalances, refresh, totalans]); return <Context.Provider value={value}>{children}</Context.Provider>;
 }
-
-export function useTotalans() {
-  const context = useContext(TotalansContext);
-  if (!context) throw new Error("useTotalans harus digunakan di dalam TotalansProvider.");
-  return context;
-}
+export function useTotalans() { const value = useContext(Context); if (!value) throw new Error("useTotalans harus digunakan di dalam TotalansProvider."); return value; }

@@ -33,7 +33,7 @@ export function notaIdForTotalan(totalanId: string) {
 export function getTransactionNota(transaction: TransactionRecord): NotaRecord {
   return {
     id: notaIdForTransaction(transaction.id),
-    number: `NT-${compactDate(transaction.transactionDate)}-${sourceSuffix(transaction.id)}`,
+    number: transaction.transactionNumber ?? `NT-${compactDate(transaction.transactionDate)}-${sourceSuffix(transaction.id)}`,
     date: transaction.transactionDate,
     type: "TRANSACTION",
     recipientName: transaction.sellerName,

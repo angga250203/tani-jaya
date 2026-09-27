@@ -13,7 +13,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { toSalesNotaView, type SalesNotaView } from "@/lib/sales-nota";
 import { cn, formatRupiah } from "@/lib/utils";
 import { useSales } from "./sales-provider";
-import { useTransactions } from "./transactions-provider";
 
 type NotaMode = "DIGITAL" | "THERMAL";
 
@@ -47,12 +46,13 @@ function NotaNotFound() {
 
 export function SalesNotaPage({ saleId }: { saleId: string }) {
   const router = useRouter();
-  const { sales } = useSales();
-  const { transactions } = useTransactions();
+  const { sales, isLoading, error } = useSales();
   const [mode, setMode] = useState<NotaMode>("DIGITAL");
   const reduceMotion = useReducedMotion();
   const sale = sales.find((entry) => entry.id === saleId);
-  const nota = useMemo(() => sale ? toSalesNotaView(sale, transactions) : null, [sale, transactions]);
+  const nota = useMemo(() => sale ? toSalesNotaView(sale) : null, [sale]);
+  if (isLoading) return <div className="py-8 lg:py-12"><ContentContainer><Card><CardContent className="py-10 text-center text-sm text-tj-muted">Memuat nota Penjualan...</CardContent></Card></ContentContainer></div>;
+  if (error) return <div className="py-8 lg:py-12"><ContentContainer><Card><CardContent className="py-10 text-center text-sm text-tj-danger">{error}</CardContent></Card></ContentContainer></div>;
   if (!nota) return <NotaNotFound />;
   const motionProps = { animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: reduceMotion ? 0 : 8 }, initial: { opacity: 0, y: reduceMotion ? 0 : 8 }, transition: { duration: reduceMotion ? 0.01 : 0.2, ease: "easeOut" as const } };
 

@@ -11,7 +11,7 @@ import { useSales } from "@/components/transactions/sales-provider";
 import { useStocks } from "@/components/stocks/stocks-provider";
 import { Button } from "@/components/ui/button";
 import { Input, SelectField } from "@/components/ui/input";
-import { buyerTypeLabel, deriveSaleTotals, formatSaleDate, type BuyerType, type MockSaleCorrectionInput, type SaleDeliveryMethod, type SaleRecord, type SaleStockAllocation } from "@/lib/sales";
+import { buyerTypeLabel, deriveSaleTotals, formatSaleDate, type BuyerType, type SaleCorrectionInput, type SaleDeliveryMethod, type SaleRecord, type SaleStockAllocation } from "@/lib/sales";
 import { formatRupiah } from "@/lib/utils";
 
 type DraftLine = { key: string; commodity: string; grade: "SP" | "TG" | "BR"; grossWeightKg: number; deduction: string; price: string };
@@ -42,10 +42,10 @@ function parseWhole(value: string) {
 
 export function SaleCorrectionForm({ saleId }: { saleId: string }) {
   const router = useRouter();
-  const { correctMockSale, sales } = useSales();
-  const { getSourcesForSaleCorrection } = useStocks();
+  const { correctSale, sales, isLoading: salesLoading, error: salesError } = useSales();
+  const { getSourcesForSaleCorrection, isLoading: stockLoading, error: stockError } = useStocks();
   const sale = sales.find((record) => record.id === saleId);
-  const [selectedAllocations, setSelectedAllocations] = useState<SaleStockAllocation[]>(() => sale?.allocations ?? []);
+  const [selectedAllocations, setSelectedAllocations] = useState<SaleStockAllocation[]>(() => sale?.allocations.filter((allocation) => !allocation.releasedAt) ?? []);
   const [lines, setLines] = useState<DraftLine[]>(() => sale ? buildLines(sale.allocations ?? [], sale) : []);
   const [buyerName, setBuyerName] = useState(() => sale?.buyerName ?? "");
   const [buyerType, setBuyerType] = useState<BuyerType>(() => sale?.buyerType ?? "GENERAL_BUYER");
@@ -72,6 +72,12 @@ export function SaleCorrectionForm({ saleId }: { saleId: string }) {
     };
   }, [lines]);
 
+  if (salesLoading || stockLoading) {
+    return <div className="py-5 sm:py-6 lg:py-8"><ContentContainer><div className="rounded-2xl border border-tj-border bg-tj-surface p-6 text-center text-sm text-tj-muted">Memuat data Penjualan dan stok...</div></ContentContainer></div>;
+  }
+  if (salesError || stockError) {
+    return <div className="py-5 sm:py-6 lg:py-8"><ContentContainer><div className="rounded-2xl border border-tj-danger/20 bg-tj-danger-soft p-6 text-center text-sm text-tj-danger">{salesError ?? stockError}</div></ContentContainer></div>;
+  }
   if (!sale || sale.lifecycleStatus !== "ACTIVE") {
     return <div className="py-5 sm:py-6 lg:py-8"><ContentContainer><div className="rounded-2xl border border-tj-border bg-tj-surface p-6 text-center"><h1 className="text-lg font-bold text-tj-text">Penjualan tidak dapat dikoreksi</h1><p className="mt-2 text-sm text-tj-muted">Transaksi tidak ditemukan atau sudah dibatalkan.</p><Link className="mt-4 inline-flex min-h-11 items-center rounded-xl bg-tj-primary px-4 text-sm font-semibold text-white" href="/transaksi?tab=penjualan">Kembali ke Penjualan</Link></div></ContentContainer></div>;
   }
@@ -91,7 +97,7 @@ export function SaleCorrectionForm({ saleId }: { saleId: string }) {
     setPickerOpen(false);
   };
 
-  const submit = () => {
+  const submit = async () => {
     const priceOrDeductionInvalid = lines.some((line) => {
       const deduction = parseWhole(line.deduction);
       const price = parseWhole(line.price);
@@ -104,15 +110,16 @@ export function SaleCorrectionForm({ saleId }: { saleId: string }) {
     if (deliveryMethod === "EXPEDITION" && (!expeditionName.trim() || expeditionRateValue === null)) { setError("Nama ekspedisi dan tarif per kg wajib diisi."); return; }
     if (!reason.trim()) { setError("Alasan koreksi wajib diisi."); return; }
 
-    const items: MockSaleCorrectionInput["items"] = lines.map((line) => {
+    const items: SaleCorrectionInput["items"] = lines.map((line) => {
       const deductionWeightKg = parseWhole(line.deduction)!;
       const pricePerKg = parseWhole(line.price)!;
       const netWeightKg = line.grossWeightKg - deductionWeightKg;
       return { commodity: line.commodity, grade: line.grade, grossWeightKg: line.grossWeightKg, deductionWeightKg, netWeightKg, pricePerKg, subtotal: netWeightKg * pricePerKg };
     });
-    const result = correctMockSale(sale.id, { buyerName, buyerType, deliveryMethod, expeditionName, expeditionRatePerKg: deliveryMethod === "EXPEDITION" ? expeditionRateValue ?? undefined : undefined, items, allocations: selectedAllocations, reason });
-    if (!result.ok) { setError(result.error); return; }
     setIsSubmitting(true);
+    const result = await correctSale(sale.id, { buyerName, buyerType, deliveryMethod, expeditionName, expeditionRatePerKg: deliveryMethod === "EXPEDITION" ? expeditionRateValue ?? undefined : undefined, items, allocations: selectedAllocations, reason });
+    setIsSubmitting(false);
+    if (result.error) { setError(result.error); return; }
     setToast("Penjualan berhasil dikoreksi.");
     window.setTimeout(() => router.push(`/transaksi/penjualan/${sale.id}`), 420);
   };

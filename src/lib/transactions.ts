@@ -3,8 +3,8 @@ export type PaymentStatus = "PAID" | "UNPAID";
 export type WeighingMethod = "TOTAL_LANGSUNG" | "PER_KARUNG" | "PER_PETI";
 export type PurchaseGrade = "SP" | "TG" | "BR";
 
-export type TransactionItem = { id: string; commodity: string; grade: PurchaseGrade; weighingMethod: WeighingMethod; containerWeights: number[]; grossWeight: number; deduction: number; netWeight: number; pricePerKg: number; subtotal: number; stockHistoryLocked?: boolean };
-export type TransactionRecord = { id: string; transactionDate: string; transactionTime: string; sellerType: SellerType; farmerId?: string; sellerName: string; scheduleId?: string; fieldId?: string; cycleId?: string; paymentStatus: PaymentStatus; totalanId?: string; notes: string; items: TransactionItem[]; totalNetWeight: number; totalAmount: number };
+export type TransactionItem = { id: string; commodity: string; grade: PurchaseGrade; weighingMethod: WeighingMethod; containerWeights: number[]; containerIds?: string[]; grossWeight: number; deduction: number; netWeight: number; pricePerKg: number; subtotal: number; stockHistoryLocked?: boolean };
+export type TransactionRecord = { id: string; transactionNumber?: string; transactionDate: string; transactionTime: string; transactionTimeRaw?: string; sellerType: SellerType; farmerId?: string; sellerName: string; scheduleId?: string; scheduleDate?: string; fieldId?: string; cycleId?: string; cycleCommodity?: string; paymentStatus: PaymentStatus; totalanId?: string; notes: string; items: TransactionItem[]; totalNetWeight: number; totalAmount: number };
 
 export function calculateGrossWeight(method: WeighingMethod, directWeight: number, containerWeights: number[]) { return method === "TOTAL_LANGSUNG" ? directWeight : containerWeights.reduce((sum, weight) => sum + weight, 0); }
 export function calculateNetWeight(grossWeight: number, deduction: number) { return Math.max(0, grossWeight - deduction); }
@@ -12,6 +12,11 @@ export function calculateCommoditySubtotal(netWeight: number, pricePerKg: number
 export function calculateTransactionTotal(items: Pick<TransactionItem, "netWeight" | "subtotal">[]) { return items.reduce((total, item) => total + item.subtotal, 0); }
 export function calculateTransactionWeight(items: Pick<TransactionItem, "netWeight">[]) { return items.reduce((total, item) => total + item.netWeight, 0); }
 
+/**
+ * Legacy fixtures retained only by modules that have not moved to Supabase.
+ * The Pembelian UI reads its list, details, forms, and nota exclusively from
+ * the live purchase query/RPC adapters in `src/lib/purchases.ts`.
+ */
 export const initialTransactions: TransactionRecord[] = [
   { id: "transaksi-007", transactionDate: "2026-09-12", transactionTime: "08.10 WIB", sellerType: "PETANI_MITRA", farmerId: "petani-001", sellerName: "Budi Santoso", paymentStatus: "PAID", notes: "Pembayaran tunai panen Cabai Rawit.", items: [
     { id: "detail-008", commodity: "Cabai Rawit", grade: "SP", weighingMethod: "TOTAL_LANGSUNG", containerWeights: [], grossWeight: 122, deduction: 2, netWeight: 120, pricePerKg: 25_000, subtotal: 3_000_000 },
@@ -37,7 +42,7 @@ export const initialTransactions: TransactionRecord[] = [
 ];
 
 export function getTransactionById(id: string) { return initialTransactions.find((transaction) => transaction.id === id); }
-export function formatTransactionDate(date: string) { return new Intl.DateTimeFormat("id-ID", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(`${date}T00:00:00`)); }
+export function formatTransactionDate(date: string) { return new Intl.DateTimeFormat("id-ID", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`)); }
 export function sellerTypeLabel(type: SellerType) { return type === "PETANI_MITRA" ? "Petani Mitra" : "Penjual Umum"; }
 export function paymentStatusLabel(status: PaymentStatus) { return status === "PAID" ? "Lunas" : "Belum Dibayar"; }
 export function transactionPaymentStatusLabel(transaction: TransactionRecord) { return transaction.totalanId ? "Lunas / Ditotal" : paymentStatusLabel(transaction.paymentStatus); }

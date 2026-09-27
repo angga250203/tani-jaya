@@ -17,11 +17,13 @@ function Summary({ label, value }: { label: string; value: string }) { return <C
 
 export function KasbonDetailPage({ farmerId, initialFarmer }: { farmerId: string; initialFarmer?: Farmer }) {
   const { records } = useFarmers();
-  const { getBalance, getEntries } = useKasbons();
+  const { getBalance, getEntries, isLoading, error, refresh } = useKasbons();
   const farmer = records.find((record) => record.id === farmerId) ?? initialFarmer;
   const entries = getEntries(farmerId);
   const balance = getBalance(farmerId);
   const totals = useMemo(() => getKasbonTotals(entries), [entries]);
+  if (isLoading && !farmer) return <div className="py-5"><ContentContainer><Card className="max-w-xl"><CardContent className="p-5 text-sm text-tj-muted">Memuat Kasbon…</CardContent></Card></ContentContainer></div>;
+  if (error && !farmer) return <div className="py-5"><ContentContainer><Card className="max-w-xl"><CardContent className="p-5"><h1 className="text-lg font-bold text-tj-text">Kasbon belum dapat dimuat</h1><button className="mt-3 text-sm font-semibold text-tj-primary" onClick={() => void refresh()} type="button">Coba lagi</button></CardContent></Card></ContentContainer></div>;
   if (!farmer) {
     return <div className="py-5"><ContentContainer><Card className="max-w-xl"><CardContent className="p-5"><h1 className="text-lg font-bold text-tj-text">Petani tidak ditemukan</h1><Link className="mt-3 inline-flex text-sm font-semibold text-tj-primary hover:underline" href="/kasbon">Kembali ke Kasbon</Link></CardContent></Card></ContentContainer></div>;
   }

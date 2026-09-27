@@ -10,8 +10,12 @@ import { formatRupiah } from "@/lib/utils";
 import { useTotalans } from "./totalans-provider";
 
 export function DetailTotalanPage({ initialTotalan, totalanId }: { initialTotalan?: TotalanRecord; totalanId: string }) {
-  const { totalans } = useTotalans();
+  const { totalans, isLoading, error, refresh } = useTotalans();
   const totalan = totalans.find((item) => item.id === totalanId) ?? initialTotalan;
+
+  if (isLoading && !totalan) return <div className="py-5"><ContentContainer><Card className="max-w-xl"><CardContent className="p-5 text-sm text-tj-muted">Memuat Totalan…</CardContent></Card></ContentContainer></div>;
+
+  if (error && !totalan) return <div className="py-5"><ContentContainer><Card className="max-w-xl"><CardContent className="p-5"><h1 className="text-lg font-bold text-tj-text">Totalan belum dapat dimuat</h1><button className="mt-3 text-sm font-semibold text-tj-primary" onClick={() => void refresh()} type="button">Coba lagi</button></CardContent></Card></ContentContainer></div>;
 
   if (!totalan) {
     return <div className="py-5"><ContentContainer><Card className="max-w-xl"><CardContent className="p-5"><h1 className="text-lg font-bold text-tj-text">Totalan tidak ditemukan</h1><Link className="mt-3 inline-flex text-sm font-semibold text-tj-primary hover:underline" href="/totalan">Kembali ke Totalan</Link></CardContent></Card></ContentContainer></div>;

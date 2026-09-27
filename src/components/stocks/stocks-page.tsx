@@ -198,7 +198,7 @@ function FilterControls({ sellerType, method, onSellerTypeChange, onMethodChange
 }
 
 export function StocksPage() {
-  const { sources: stockSources } = useStocks();
+  const { sources: stockSources, isLoading, error } = useStocks();
   const [query, setQuery] = useState("");
   const [grade, setGrade] = useState<GradeFilter>("ALL");
   const [sellerType, setSellerType] = useState<SellerTypeFilter>("ALL");
@@ -293,7 +293,7 @@ export function StocksPage() {
               </div>
               {hasActiveFilters && <button className="min-h-10 shrink-0 rounded-lg px-2.5 text-sm font-semibold text-tj-primary hover:bg-tj-primary-soft" onClick={clearFilters} type="button">Reset</button>}
             </div>
-            {availableSources.length ? (
+            {isLoading ? <Card><CardContent className="py-8 text-center text-sm text-tj-muted">Memuat stok dari Pembelian...</CardContent></Card> : error ? <Card><CardContent className="py-8 text-center text-sm text-tj-danger" role="alert">{error}</CardContent></Card> : availableSources.length ? (
               <motion.div className="space-y-3 lg:space-y-4" layout>
                 <AnimatePresence initial={false} mode="popLayout">
                   {groups.map((group) => (

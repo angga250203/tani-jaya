@@ -1,43 +1,125 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
-import { calculateTransactionTotal, calculateTransactionWeight, initialTransactions, type TransactionRecord } from "@/lib/transactions";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { purchaseErrorMessage, readPurchases, toPurchasePayload } from "@/lib/purchases";
+import { createClient } from "@/lib/supabase/client";
+import type { TransactionRecord } from "@/lib/transactions";
 import type { TransactionFormValues } from "@/lib/validations";
+
+type PurchaseMutationResult = { record?: TransactionRecord; error?: string };
 
 type TransactionsContextValue = {
   transactions: TransactionRecord[];
-  createTransaction: (values: TransactionFormValues, sellerName: string) => TransactionRecord;
-  updateTransaction: (id: string, values: TransactionFormValues, sellerName: string) => void;
+  isLoading: boolean;
+  error: string | null;
+  refresh: () => Promise<boolean>;
+  createTransaction: (values: TransactionFormValues) => Promise<PurchaseMutationResult>;
+  updateTransaction: (id: string, values: TransactionFormValues) => Promise<PurchaseMutationResult>;
+  /** Totalan remains a later migration phase. It must not mutate Supabase Purchases locally. */
   settleTransactionsInTotalan: (transactionIds: string[], totalanId: string) => void;
 };
+
 const TransactionsContext = createContext<TransactionsContextValue | null>(null);
 
-function toRecord(id: string, values: TransactionFormValues, sellerName: string): TransactionRecord {
-  const items = values.items.map((item, index) => { const grossWeight = item.weighingMethod === "TOTAL_LANGSUNG" ? item.grossWeight : item.containers.reduce((total, container) => total + container.weight, 0); const deduction = item.deduction ?? 0; const netWeight = grossWeight - deduction; return { id: `detail-${id}-${index + 1}`, commodity: item.commodity, grade: item.grade, weighingMethod: item.weighingMethod, containerWeights: item.weighingMethod === "TOTAL_LANGSUNG" ? [] : item.containers.map((container) => container.weight), grossWeight, deduction, netWeight, pricePerKg: item.pricePerKg, subtotal: netWeight * item.pricePerKg }; });
-  const transactionTime = `${new Intl.DateTimeFormat("id-ID", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Jakarta" }).format(new Date())} WIB`;
-  return { id, transactionDate: values.transactionDate, transactionTime, sellerType: values.sellerType, farmerId: values.sellerType === "PETANI_MITRA" ? values.farmerId : undefined, sellerName, scheduleId: values.scheduleId, fieldId: values.fieldId, cycleId: values.cycleId, paymentStatus: values.sellerType === "PENJUAL_UMUM" ? "PAID" : values.paymentStatus ?? "UNPAID", notes: values.notes?.trim() ?? "", items, totalNetWeight: calculateTransactionWeight(items), totalAmount: calculateTransactionTotal(items) };
-}
-
 export function TransactionsProvider({ children }: { children: ReactNode }) {
-  const [transactions, setTransactions] = useState(initialTransactions);
-  const createTransaction = useCallback((values: TransactionFormValues, sellerName: string) => { const record = toRecord(`transaksi-local-${Date.now()}`, values, sellerName); setTransactions((current) => [record, ...current]); return record; }, []);
-  const updateTransaction = useCallback((id: string, values: TransactionFormValues, sellerName: string) => {
-    setTransactions((current) => current.map((transaction) => {
-      if (transaction.id !== id) return transaction;
-      if (transaction.totalanId) return transaction;
-      const updated = toRecord(id, values, sellerName);
-      return updated;
-    }));
+  const [transactions, setTransactions] = useState<TransactionRecord[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const requestVersion = useRef(0);
+
+  const refresh = useCallback(async () => {
+    const request = ++requestVersion.current;
+    setIsLoading(true);
+    setError(null);
+    const result = await readPurchases(createClient());
+    if (request !== requestVersion.current) return false;
+
+    setIsLoading(false);
+    if (result.error) {
+      setError(result.error);
+      return false;
+    }
+
+    setTransactions(result.data ?? []);
+    return true;
   }, []);
-  const settleTransactionsInTotalan = useCallback((transactionIds: string[], totalanId: string) => {
-    setTransactions((current) => current.map((transaction) => (
-      transactionIds.includes(transaction.id)
-        ? { ...transaction, paymentStatus: "PAID", totalanId }
-        : transaction
-    )));
+
+  useEffect(() => {
+    let active = true;
+    const loadInitialPurchases = async () => {
+      const result = await readPurchases(createClient());
+      if (!active) return;
+      setIsLoading(false);
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
+      setTransactions(result.data ?? []);
+    };
+    void loadInitialPurchases();
+    return () => { active = false; };
   }, []);
-  const value = useMemo(() => ({ transactions, createTransaction, updateTransaction, settleTransactionsInTotalan }), [createTransaction, settleTransactionsInTotalan, transactions, updateTransaction]);
+
+  const reloadAfterMutation = useCallback(async (transactionId: string): Promise<PurchaseMutationResult> => {
+    const request = ++requestVersion.current;
+    setIsLoading(true);
+    setError(null);
+    const result = await readPurchases(createClient());
+    if (request !== requestVersion.current) return { error: "Pembaruan data Pembelian dibatalkan." };
+
+    setIsLoading(false);
+    if (result.error) {
+      setError(result.error);
+      return { error: result.error };
+    }
+
+    const refreshed = result.data ?? [];
+    setTransactions(refreshed);
+    const record = refreshed.find((transaction) => transaction.id === transactionId);
+    return record ? { record } : { error: "Pembelian sudah tersimpan, tetapi data terbaru belum dapat dimuat." };
+  }, []);
+
+  const createTransaction = useCallback(async (values: TransactionFormValues): Promise<PurchaseMutationResult> => {
+    const { data, error: rpcError } = await createClient().rpc("create_purchase", { p_payload: toPurchasePayload(values) });
+    if (rpcError) return { error: purchaseErrorMessage(rpcError) };
+    const result = data?.[0];
+    if (!result?.transaction_id) return { error: "Pembelian belum dapat disimpan. Coba lagi." };
+    return reloadAfterMutation(result.transaction_id);
+  }, [reloadAfterMutation]);
+
+  const updateTransaction = useCallback(async (id: string, values: TransactionFormValues): Promise<PurchaseMutationResult> => {
+    const { data, error: rpcError } = await createClient().rpc("update_purchase", {
+      p_transaction_id: id,
+      p_payload: toPurchasePayload(values),
+    });
+    if (rpcError) return { error: purchaseErrorMessage(rpcError) };
+    const result = data?.[0];
+    if (!result?.transaction_id) return { error: "Pembelian belum dapat diperbarui. Coba lagi." };
+    return reloadAfterMutation(result.transaction_id);
+  }, [reloadAfterMutation]);
+
+  const settleTransactionsInTotalan = useCallback((_transactionIds: string[], _totalanId: string) => {
+    // Intentionally empty: Totalan is still a mock module and cannot alter the
+    // real Purchase source of truth before its own Supabase integration.
+    void _transactionIds;
+    void _totalanId;
+  }, []);
+
+  const value = useMemo(() => ({
+    transactions,
+    isLoading,
+    error,
+    refresh,
+    createTransaction,
+    updateTransaction,
+    settleTransactionsInTotalan,
+  }), [createTransaction, error, isLoading, refresh, settleTransactionsInTotalan, transactions, updateTransaction]);
+
   return <TransactionsContext.Provider value={value}>{children}</TransactionsContext.Provider>;
 }
 
-export function useTransactions() { const context = useContext(TransactionsContext); if (!context) throw new Error("useTransactions harus digunakan di dalam TransactionsProvider."); return context; }
+export function useTransactions() {
+  const context = useContext(TransactionsContext);
+  if (!context) throw new Error("useTransactions harus digunakan di dalam TransactionsProvider.");
+  return context;
+}

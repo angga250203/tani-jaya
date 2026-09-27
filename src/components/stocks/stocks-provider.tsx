@@ -1,50 +1,114 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
-import { useTransactions } from "@/components/transactions/transactions-provider";
-import { initialSales, type SaleStockAllocation } from "@/lib/sales";
-import { availableStockWeight, deriveStockSources, type StockSource } from "@/lib/stocks";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { readStockSources } from "@/lib/sales-repository";
+import type { SaleStockAllocation } from "@/lib/sales";
+import type { StockSource } from "@/lib/stocks";
+import { createClient } from "@/lib/supabase/client";
 
-type StocksContextValue = { sources: StockSource[]; reserveStock: (allocations: SaleStockAllocation[]) => boolean; releaseStock: (allocations: SaleStockAllocation[]) => void; replaceSaleStock: (previous: SaleStockAllocation[], next: SaleStockAllocation[]) => boolean; getSourcesForSaleCorrection: (previous: SaleStockAllocation[]) => StockSource[] };
+type StocksContextValue = {
+  sources: StockSource[];
+  isLoading: boolean;
+  error: string | null;
+  refresh: () => Promise<boolean>;
+  getSourcesForSaleCorrection: (previous: SaleStockAllocation[]) => StockSource[];
+};
+
 const StocksContext = createContext<StocksContextValue | null>(null);
-const initialActiveAllocations = initialSales.filter((sale) => sale.lifecycleStatus === "ACTIVE").flatMap((sale) => sale.allocations ?? []);
 
-function canReserve(sources: StockSource[], allocations: SaleStockAllocation[]) {
-  const containerIds = allocations.flatMap((allocation) => allocation.purchaseContainerId ? [`${allocation.sourceId}:${allocation.purchaseContainerId}`] : []);
-  if (new Set(containerIds).size !== containerIds.length) return false;
-  const directBySource = new Map<string, number>();
-  for (const allocation of allocations) {
-    const source = sources.find((item) => item.id === allocation.sourceId);
-    if (!source || source.purchaseItemId !== allocation.purchaseItemId || allocation.allocatedGrossWeightKg <= 0) return false;
+function correctionSources(sources: StockSource[], previous: SaleStockAllocation[]) {
+  const result = new Map(sources.map((source) => [source.id, { ...source, containers: source.containers ? [...source.containers] : undefined }]));
+  previous.filter((allocation) => !allocation.releasedAt).forEach((allocation) => {
+    const current = result.get(allocation.sourceId);
     if (allocation.purchaseContainerId) {
-      if (!source.containers?.some((container) => container.id === allocation.purchaseContainerId && container.status === "available" && container.weightKg === allocation.allocatedGrossWeightKg)) return false;
-    } else {
-      if (source.containers) return false;
-      directBySource.set(source.id, (directBySource.get(source.id) ?? 0) + allocation.allocatedGrossWeightKg);
+      const container = { id: allocation.purchaseContainerId, label: allocation.purchaseContainerLabel ?? "Wadah", weightKg: allocation.allocatedGrossWeightKg, status: "available" as const };
+      if (current) {
+        if (!current.containers?.some((entry) => entry.id === container.id)) current.containers = [...(current.containers ?? []), container];
+      } else {
+        result.set(allocation.sourceId, {
+          id: allocation.sourceId,
+          purchaseTransactionId: "",
+          purchaseItemId: allocation.purchaseItemId,
+          purchaseReference: "Pembelian sebelumnya",
+          purchaseDate: "",
+          sellerType: allocation.sellerType,
+          sellerName: allocation.sellerName,
+          farmerId: allocation.farmerId,
+          commodity: allocation.commodity,
+          grade: allocation.grade,
+          weighingMethod: allocation.weighingMethod,
+          grossIncomingWeightKg: container.weightKg,
+          activeAllocatedWeightKg: 0,
+          containers: [container],
+        });
+      }
+      return;
     }
-  }
-  return [...directBySource.entries()].every(([sourceId, weight]) => weight <= availableStockWeight(sources.find((source) => source.id === sourceId)!));
+    if (current) {
+      current.activeAllocatedWeightKg = Math.max(0, current.activeAllocatedWeightKg - allocation.allocatedGrossWeightKg);
+      return;
+    }
+    result.set(allocation.sourceId, {
+      id: allocation.sourceId,
+      purchaseTransactionId: "",
+      purchaseItemId: allocation.purchaseItemId,
+      purchaseReference: "Pembelian sebelumnya",
+      purchaseDate: "",
+      sellerType: allocation.sellerType,
+      sellerName: allocation.sellerName,
+      farmerId: allocation.farmerId,
+      commodity: allocation.commodity,
+      grade: allocation.grade,
+      weighingMethod: allocation.weighingMethod,
+      grossIncomingWeightKg: allocation.allocatedGrossWeightKg,
+      activeAllocatedWeightKg: 0,
+      containers: undefined,
+    });
+  });
+  return [...result.values()];
 }
 
 export function StocksProvider({ children }: { children: ReactNode }) {
-  const { transactions } = useTransactions();
-  const [activeAllocations, setActiveAllocations] = useState<SaleStockAllocation[]>(initialActiveAllocations);
-  const sources = useMemo(() => deriveStockSources(transactions, activeAllocations), [activeAllocations, transactions]);
-  const reserveStock = useCallback((allocations: SaleStockAllocation[]) => {
-    if (!canReserve(sources, allocations)) return false;
-    setActiveAllocations((current) => [...current, ...allocations]);
+  const [sources, setSources] = useState<StockSource[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const requestVersion = useRef(0);
+
+  const refresh = useCallback(async () => {
+    const request = ++requestVersion.current;
+    setIsLoading(true);
+    setError(null);
+    const result = await readStockSources(createClient());
+    if (request !== requestVersion.current) return false;
+    setIsLoading(false);
+    if (result.error) {
+      setError(result.error);
+      return false;
+    }
+    setSources(result.data ?? []);
     return true;
-  }, [sources]);
-  const releaseStock = useCallback((allocations: SaleStockAllocation[]) => setActiveAllocations((current) => current.filter((active) => !allocations.some((allocation) => allocation.id === active.id))), []);
-  const replaceSaleStock = useCallback((previous: SaleStockAllocation[], next: SaleStockAllocation[]) => {
-    const candidate = activeAllocations.filter((active) => !previous.some((allocation) => allocation.id === active.id));
-    if (!canReserve(deriveStockSources(transactions, candidate), next)) return false;
-    setActiveAllocations([...candidate, ...next]);
-    return true;
-  }, [activeAllocations, transactions]);
-  const getSourcesForSaleCorrection = useCallback((previous: SaleStockAllocation[]) => deriveStockSources(transactions, activeAllocations.filter((active) => !previous.some((allocation) => allocation.id === active.id))), [activeAllocations, transactions]);
-  const value = useMemo(() => ({ sources, reserveStock, releaseStock, replaceSaleStock, getSourcesForSaleCorrection }), [getSourcesForSaleCorrection, releaseStock, replaceSaleStock, reserveStock, sources]);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const loadInitialStock = async () => {
+      const result = await readStockSources(createClient());
+      if (!active) return;
+      setIsLoading(false);
+      if (result.error) { setError(result.error); return; }
+      setSources(result.data ?? []);
+    };
+    void loadInitialStock();
+    return () => { active = false; };
+  }, []);
+
+  const getSourcesForSaleCorrection = useCallback((previous: SaleStockAllocation[]) => correctionSources(sources, previous), [sources]);
+  const value = useMemo(() => ({ sources, isLoading, error, refresh, getSourcesForSaleCorrection }), [error, getSourcesForSaleCorrection, isLoading, refresh, sources]);
   return <StocksContext.Provider value={value}>{children}</StocksContext.Provider>;
 }
 
-export function useStocks() { const context = useContext(StocksContext); if (!context) throw new Error("useStocks harus digunakan di dalam StocksProvider."); return context; }
+export function useStocks() {
+  const context = useContext(StocksContext);
+  if (!context) throw new Error("useStocks harus digunakan di dalam StocksProvider.");
+  return context;
+}

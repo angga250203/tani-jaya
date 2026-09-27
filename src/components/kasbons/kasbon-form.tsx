@@ -36,10 +36,11 @@ export function KasbonForm({ farmerId, initialFarmer }: { farmerId: string; init
 
   useEffect(() => () => { if (redirectTimerRef.current) clearTimeout(redirectTimerRef.current); }, []);
 
-  const saveKasbon = () => {
+  const saveKasbon = async () => {
     const values = pendingValues;
     if (!values || !values.date || !values.amount || values.amount <= 0) return;
-    addKasbon({ farmerId, date: values.date, amount: values.amount, note: values.note });
+    const result = await addKasbon({ farmerId, date: values.date, amount: values.amount, note: values.note });
+    if (result.error) { setConfirmOpen(false); setToast(result.error); return; }
     setConfirmOpen(false);
     setToast("Kasbon berhasil ditambahkan.");
     redirectTimerRef.current = setTimeout(() => router.push(`/kasbon/${farmerId}`), 700);

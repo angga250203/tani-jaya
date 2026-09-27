@@ -19,7 +19,7 @@ function ManagementDialog({
   saleId: string;
   onClose: () => void;
 }) {
-  const { cancelMockSale, deleteMockSale, sales } = useSales();
+  const { cancelSale, deleteSale, sales } = useSales();
   const router = useRouter();
   const sale = sales.find((record) => record.id === saleId);
   const [reason, setReason] = useState("");
@@ -38,17 +38,18 @@ function ManagementDialog({
 
   if (!sale) return null;
   const title = mode === "cancel" ? "Batalkan Penjualan" : mode === "delete" ? "Hapus Penjualan" : "Riwayat Perubahan";
-  const confirm = () => {
+  const confirm = async () => {
     if (mode === "cancel") {
-      const result = cancelMockSale(sale.id, reason);
-      if (!result.ok) { setError(result.error); return; }
+      if (!reason.trim()) { setError("Alasan pembatalan wajib diisi."); return; }
+      const result = await cancelSale(sale.id, reason);
+      if (result.error) { setError(result.error); return; }
       setToast("Penjualan berhasil dibatalkan.");
       window.setTimeout(onClose, 420);
       return;
     }
     if (mode === "delete") {
-      const result = deleteMockSale(sale.id);
-      if (!result.ok) { setError(result.error); return; }
+      const result = await deleteSale(sale.id);
+      if (result.error) { setError(result.error); return; }
       setToast("Penjualan berhasil dihapus.");
       window.setTimeout(() => router.push("/transaksi?tab=penjualan"), 420);
     }

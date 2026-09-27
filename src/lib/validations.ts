@@ -46,6 +46,7 @@ export type CycleEditValues = z.infer<typeof cycleEditSchema>;
 const weightSchema = z.number({ error: "Berat wajib diisi dan harus berupa kilogram bulat." }).int("Berat harus berupa kilogram bulat.").min(0, "Berat tidak boleh negatif.");
 
 const transactionItemBaseSchema = z.object({
+  id: z.string().uuid().optional(),
   commodity: z.string().trim().min(1, "Komoditas wajib dipilih."),
   grade: z.enum(["SP", "TG", "BR"], { error: "Grade wajib dipilih." }),
   deduction: weightSchema.optional(),
@@ -53,10 +54,11 @@ const transactionItemBaseSchema = z.object({
 });
 
 const activeContainerWeightSchema = z.object({
+  id: z.string().uuid().optional(),
   weight: weightSchema.refine((weight) => weight > 0, "Berat wadah harus lebih dari 0 kg."),
 });
 
-const inactiveContainerWeightSchema = z.object({ weight: z.number().optional() });
+const inactiveContainerWeightSchema = z.object({ id: z.string().uuid().optional(), weight: z.number().optional() });
 
 const directWeighingItemSchema = transactionItemBaseSchema.extend({
   weighingMethod: z.literal("TOTAL_LANGSUNG"),
@@ -98,6 +100,7 @@ const transactionItemFormSchema = z.discriminatedUnion("weighingMethod", [
 
 export const transactionFormSchema = z.object({
   transactionDate: z.string().min(1, "Tanggal transaksi wajib diisi."),
+  transactionTime: z.string().optional(),
   sellerType: z.enum(["PETANI_MITRA", "PENJUAL_UMUM"]),
   farmerId: z.string().optional(),
   sellerName: z.string().trim().optional(),

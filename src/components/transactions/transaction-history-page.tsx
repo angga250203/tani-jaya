@@ -12,15 +12,16 @@ import { Input, SelectField } from "@/components/ui/input";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { deriveSaleTotals, formatSaleDate, saleCommoditySummary, saleDeliveryLabel, sortSalesNewest } from "@/lib/sales";
 import { formatTransactionDate, transactionPaymentStatusLabel } from "@/lib/transactions";
+import { addCalendarDays, operationalDateISO } from "@/lib/operational-date";
 import { cn, formatRupiah } from "@/lib/utils";
 import { useSales } from "./sales-provider";
 import { useTransactions } from "./transactions-provider";
 
 type Domain = "PURCHASE" | "SALE";
 type DateFilter = "ALL" | "TODAY" | "LAST_7" | "MONTH" | "RANGE";
-const today = "2026-09-22";
+const today = operationalDateISO;
 const dateLabels: Record<DateFilter, string> = { ALL: "Semua", TODAY: "Hari Ini", LAST_7: "7 Hari", MONTH: "Bulan Ini", RANGE: "Rentang" };
-const dateMatches = (date: string, filter: DateFilter, start: string, end: string) => filter === "ALL" || (filter === "TODAY" && date === today) || (filter === "LAST_7" && date >= "2026-09-16" && date <= today) || (filter === "MONTH" && date.startsWith("2026-09")) || (filter === "RANGE" && (!start || date >= start) && (!end || date <= end));
+const dateMatches = (date: string, filter: DateFilter, start: string, end: string) => filter === "ALL" || (filter === "TODAY" && date === today) || (filter === "LAST_7" && date >= addCalendarDays(today, -6) && date <= today) || (filter === "MONTH" && date.startsWith(today.slice(0, 7))) || (filter === "RANGE" && (!start || date >= start) && (!end || date <= end));
 
 function Tabs({ active, onChange }: { active: Domain; onChange: (value: Domain) => void }) {
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => { if (event.key === "ArrowRight" || event.key === "ArrowLeft") { event.preventDefault(); onChange(active === "PURCHASE" ? "SALE" : "PURCHASE"); } };

@@ -1,177 +1,102 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
-import {
-  deriveSaleTotals,
-  initialSales,
-  linkAllocationsToSaleItems,
-  type MockSaleCorrectionInput,
-  type MockSaleCreateInput,
-  type SaleChangeEvent,
-  type SaleItem,
-  type SalePayment,
-  type SaleRecord,
-  validateActiveSaleAllocations,
-} from "@/lib/sales";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useStocks } from "@/components/stocks/stocks-provider";
+import { correctSaleArgs, createSaleArgs, readSales, saleErrorMessage } from "@/lib/sales-repository";
+import type { SaleCorrectionInput, SaleCreateInput, SaleRecord } from "@/lib/sales";
+import { createClient } from "@/lib/supabase/client";
 
-type MockPaymentResult = { ok: true; payment: SalePayment } | { ok: false; error: string };
-type MockMutationResult = { ok: true; sale?: SaleRecord } | { ok: false; error: string };
-
+type MutationResult = { sale?: SaleRecord; error?: string };
 type SalesContextValue = {
   sales: SaleRecord[];
-  createMockSale: (input: MockSaleCreateInput) => SaleRecord | null;
-  recordMockPayment: (saleId: string, amount: number) => MockPaymentResult;
-  correctMockSale: (saleId: string, input: MockSaleCorrectionInput) => MockMutationResult;
-  cancelMockSale: (saleId: string, reason: string) => MockMutationResult;
-  deleteMockSale: (saleId: string) => MockMutationResult;
+  isLoading: boolean;
+  error: string | null;
+  refresh: () => Promise<boolean>;
+  createSale: (input: SaleCreateInput) => Promise<MutationResult>;
+  recordSalePayment: (saleId: string, amount: number, paymentDate: string) => Promise<MutationResult>;
+  correctSale: (saleId: string, input: SaleCorrectionInput) => Promise<MutationResult>;
+  cancelSale: (saleId: string, reason: string) => Promise<MutationResult>;
+  deleteSale: (saleId: string) => Promise<MutationResult>;
 };
 
 const SalesContext = createContext<SalesContextValue | null>(null);
 
-/** TODO: replace this isolated mock generator with public.create_sale Supabase RPC. */
-function nextMockSaleNumber(sales: SaleRecord[], saleDate: string) {
-  const datePart = saleDate.replaceAll("-", "");
-  const sequence = sales.filter((sale) => sale.saleDate === saleDate).length + 1;
-  return `PJ-${datePart}-${String(sequence).padStart(4, "0")}`;
-}
-
-function event(eventType: SaleChangeEvent["eventType"], reason: string): SaleChangeEvent {
-  return { id: `sale-change-local-${Date.now()}`, eventType, reason: reason.trim(), occurredAt: new Date().toISOString() };
-}
-
-function toSaleItems(items: MockSaleCorrectionInput["items"], seed: number): SaleItem[] {
-  return items.map((saleItem, index) => ({ ...saleItem, id: `sale-item-local-${seed}-${index}` }));
-}
-
 export function SalesProvider({ children }: { children: ReactNode }) {
-  const [sales, setSales] = useState<SaleRecord[]>(initialSales);
-  const { releaseStock, replaceSaleStock, reserveStock } = useStocks();
+  const [sales, setSales] = useState<SaleRecord[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const requestVersion = useRef(0);
+  const { refresh: refreshStock } = useStocks();
 
-  const createMockSale = useCallback((input: MockSaleCreateInput) => {
-    const saleDate = "2026-09-22";
-    const idSeed = Date.now();
-    const items = input.items.map((saleItem, index) => ({ ...saleItem, id: `sale-item-local-${idSeed}-${index}` }));
-    const allocations = linkAllocationsToSaleItems(input.allocations, items);
-    if (!allocations) return null;
-    const sale: SaleRecord = {
-      id: `penjualan-local-${idSeed}`,
-      saleNumber: nextMockSaleNumber(sales, saleDate),
-      saleDate,
-      buyerName: input.buyerName.trim(),
-      buyerType: input.buyerType,
-      deliveryMethod: input.deliveryMethod,
-      expeditionName: input.expeditionName?.trim() || undefined,
-      expeditionRatePerKg: input.expeditionRatePerKg,
-      lifecycleStatus: "ACTIVE",
-      items,
-      payments: [],
-      allocations,
-    };
-    const totals = deriveSaleTotals(sale);
-    if (input.initialPayment < 0 || input.initialPayment > totals.totalAmount || validateActiveSaleAllocations(sale) || !reserveStock(allocations)) return null;
-    if (input.initialPayment > 0) {
-      sale.payments = [{
-        id: `sale-payment-local-${idSeed}`,
-        paymentDate: saleDate,
-        amount: input.initialPayment,
-        remainingBalanceAfter: totals.totalAmount - input.initialPayment,
-      }];
+  const refresh = useCallback(async () => {
+    const request = ++requestVersion.current;
+    setIsLoading(true);
+    setError(null);
+    const result = await readSales(createClient());
+    if (request !== requestVersion.current) return false;
+    setIsLoading(false);
+    if (result.error) {
+      setError(result.error);
+      return false;
     }
-    setSales((current) => [sale, ...current]);
-    return sale;
-  }, [reserveStock, sales]);
+    setSales(result.data ?? []);
+    return true;
+  }, []);
 
-  /** TODO: replace with the narrow record-sale-payment Supabase RPC. */
-  const recordMockPayment = useCallback((saleId: string, amount: number): MockPaymentResult => {
-    const sale = sales.find((record) => record.id === saleId);
-    if (!sale) return { ok: false, error: "Transaksi penjualan tidak ditemukan." };
-    const totals = deriveSaleTotals(sale);
-    if (sale.lifecycleStatus !== "ACTIVE") return { ok: false, error: "Pembayaran tidak dapat dicatat pada transaksi yang dibatalkan." };
-    if (!Number.isSafeInteger(amount) || amount <= 0) return { ok: false, error: "Nominal pembayaran harus lebih dari Rp0." };
-    if (amount > totals.remainingBalance) return { ok: false, error: "Pembayaran tidak boleh melebihi sisa piutang." };
-
-    const payment: SalePayment = {
-      id: `sale-payment-local-${Date.now()}`,
-      paymentDate: "2026-09-22",
-      amount,
-      remainingBalanceAfter: totals.remainingBalance - amount,
+  useEffect(() => {
+    let active = true;
+    const loadInitialSales = async () => {
+      const result = await readSales(createClient());
+      if (!active) return;
+      setIsLoading(false);
+      if (result.error) { setError(result.error); return; }
+      setSales(result.data ?? []);
     };
-    setSales((current) => current.map((record) => record.id === saleId ? { ...record, payments: [...record.payments, payment] } : record));
-    return { ok: true, payment };
-  }, [sales]);
+    void loadInitialSales();
+    return () => { active = false; };
+  }, []);
 
-  /** TODO: replace with public.correct_sale RPC; it keeps the payment ledger immutable. */
-  const correctMockSale = useCallback((saleId: string, input: MockSaleCorrectionInput): MockMutationResult => {
-    const sale = sales.find((record) => record.id === saleId);
-    const reason = input.reason.trim();
-    if (!sale) return { ok: false, error: "Transaksi penjualan tidak ditemukan." };
-    if (sale.lifecycleStatus !== "ACTIVE") return { ok: false, error: "Transaksi yang dibatalkan tidak dapat dikoreksi." };
-    if (!reason) return { ok: false, error: "Alasan koreksi wajib diisi." };
-    if (!input.buyerName.trim() || !input.items.length || !input.allocations.length) return { ok: false, error: "Lengkapi data Penjualan dan stok yang digunakan." };
+  const refreshAfterMutation = useCallback(async (saleId?: string): Promise<MutationResult> => {
+    const result = await readSales(createClient());
+    await refreshStock();
+    if (result.error) return { error: "Perubahan tersimpan, tetapi data Penjualan terbaru belum dapat dimuat." };
+    setError(null);
+    setSales(result.data ?? []);
+    return { sale: saleId ? result.data?.find((sale) => sale.id === saleId) : undefined };
+  }, [refreshStock]);
 
-    const seed = Date.now();
-    const items = toSaleItems(input.items, seed);
-    const allocations = linkAllocationsToSaleItems(input.allocations, items);
-    if (!allocations) return { ok: false, error: "Alokasi stok tidak cocok dengan item Penjualan." };
-    const proposed: SaleRecord = {
-      ...sale,
-      buyerName: input.buyerName.trim(),
-      buyerType: input.buyerType,
-      deliveryMethod: input.deliveryMethod,
-      expeditionName: input.deliveryMethod === "EXPEDITION" ? input.expeditionName?.trim() || undefined : undefined,
-      expeditionRatePerKg: input.deliveryMethod === "EXPEDITION" ? input.expeditionRatePerKg : undefined,
-      items,
-      allocations,
-    };
-    const oldTotals = deriveSaleTotals(sale);
-    const proposedTotals = deriveSaleTotals(proposed);
-    const allocationError = validateActiveSaleAllocations(proposed);
-    if (allocationError) return { ok: false, error: allocationError };
-    if (proposedTotals.totalAmount < oldTotals.totalPaid) {
-      return { ok: false, error: "Total nota setelah koreksi tidak boleh lebih kecil dari pembayaran yang sudah diterima." };
-    }
-    if (!replaceSaleStock(sale.allocations ?? [], allocations)) {
-      return { ok: false, error: "Stok yang dipilih sudah tidak tersedia. Data Penjualan tidak diubah." };
-    }
+  const createSale = useCallback(async (input: SaleCreateInput): Promise<MutationResult> => {
+    const { data, error: rpcError } = await createClient().rpc("create_sale", createSaleArgs(input) as never);
+    if (rpcError) return { error: saleErrorMessage(rpcError) };
+    return refreshAfterMutation(data);
+  }, [refreshAfterMutation]);
 
-    const nextSale: SaleRecord = { ...proposed, changeEvents: [...(sale.changeEvents ?? []), event("CORRECTED", reason)] };
-    setSales((current) => current.map((record) => record.id === saleId ? nextSale : record));
-    return { ok: true, sale: nextSale };
-  }, [replaceSaleStock, sales]);
+  const recordSalePayment = useCallback(async (saleId: string, amount: number, paymentDate: string): Promise<MutationResult> => {
+    const { error: rpcError } = await createClient().rpc("record_sale_payment", { p_sale_id: saleId, p_amount: amount, p_payment_date: paymentDate });
+    if (rpcError) return { error: saleErrorMessage(rpcError) };
+    return refreshAfterMutation(saleId);
+  }, [refreshAfterMutation]);
 
-  /** TODO: replace with public.cancel_sale RPC. Cancellation retains payments and allocation history. */
-  const cancelMockSale = useCallback((saleId: string, suppliedReason: string): MockMutationResult => {
-    const sale = sales.find((record) => record.id === saleId);
-    const reason = suppliedReason.trim();
-    if (!sale) return { ok: false, error: "Transaksi penjualan tidak ditemukan." };
-    if (sale.lifecycleStatus !== "ACTIVE") return { ok: false, error: "Transaksi ini sudah dibatalkan." };
-    if (!reason) return { ok: false, error: "Alasan pembatalan wajib diisi." };
+  const correctSale = useCallback(async (saleId: string, input: SaleCorrectionInput): Promise<MutationResult> => {
+    const { error: rpcError } = await createClient().rpc("correct_sale", correctSaleArgs(saleId, input) as never);
+    if (rpcError) return { error: saleErrorMessage(rpcError) };
+    return refreshAfterMutation(saleId);
+  }, [refreshAfterMutation]);
 
-    releaseStock(sale.allocations ?? []);
-    const nextSale: SaleRecord = {
-      ...sale,
-      lifecycleStatus: "CANCELLED",
-      cancellationReason: reason,
-      changeEvents: [...(sale.changeEvents ?? []), event("CANCELLED", reason)],
-    };
-    setSales((current) => current.map((record) => record.id === saleId ? nextSale : record));
-    return { ok: true, sale: nextSale };
-  }, [releaseStock, sales]);
+  const cancelSale = useCallback(async (saleId: string, reason: string): Promise<MutationResult> => {
+    const { error: rpcError } = await createClient().rpc("cancel_sale", { p_sale_id: saleId, p_reason: reason.trim() });
+    if (rpcError) return { error: saleErrorMessage(rpcError) };
+    return refreshAfterMutation(saleId);
+  }, [refreshAfterMutation]);
 
-  /** TODO: replace with public.hard_delete_sale RPC; payment history always blocks deletion. */
-  const deleteMockSale = useCallback((saleId: string): MockMutationResult => {
-    const sale = sales.find((record) => record.id === saleId);
-    if (!sale) return { ok: false, error: "Transaksi penjualan tidak ditemukan." };
-    if (sale.lifecycleStatus !== "ACTIVE") return { ok: false, error: "Hanya transaksi aktif yang dapat dihapus permanen." };
-    if (sale.payments.length > 0) return { ok: false, error: "Transaksi dengan riwayat pembayaran tidak dapat dihapus permanen." };
+  const deleteSale = useCallback(async (saleId: string): Promise<MutationResult> => {
+    const { error: rpcError } = await createClient().rpc("delete_sale_without_payments", { p_sale_id: saleId });
+    if (rpcError) return { error: saleErrorMessage(rpcError) };
+    await Promise.all([refresh(), refreshStock()]);
+    return {};
+  }, [refresh, refreshStock]);
 
-    releaseStock(sale.allocations ?? []);
-    setSales((current) => current.filter((record) => record.id !== saleId));
-    return { ok: true };
-  }, [releaseStock, sales]);
-
-  const value = useMemo(() => ({ sales, createMockSale, recordMockPayment, correctMockSale, cancelMockSale, deleteMockSale }), [cancelMockSale, correctMockSale, createMockSale, deleteMockSale, recordMockPayment, sales]);
+  const value = useMemo(() => ({ sales, isLoading, error, refresh, createSale, recordSalePayment, correctSale, cancelSale, deleteSale }), [cancelSale, correctSale, createSale, deleteSale, error, isLoading, recordSalePayment, refresh, sales]);
   return <SalesContext.Provider value={value}>{children}</SalesContext.Provider>;
 }
 

@@ -687,7 +687,8 @@ export type Database = {
           kasbon_deduction_amount: number
           status: string
           total_net_weight_kg: number
-          totalan_number: string
+          totalan_date: string
+          totalan_number: string | null
         }
         Insert: {
           created_at?: string
@@ -699,7 +700,8 @@ export type Database = {
           kasbon_deduction_amount?: number
           status?: string
           total_net_weight_kg: number
-          totalan_number: string
+          totalan_date: string
+          totalan_number?: string | null
         }
         Update: {
           created_at?: string
@@ -711,7 +713,8 @@ export type Database = {
           kasbon_deduction_amount?: number
           status?: string
           total_net_weight_kg?: number
-          totalan_number?: string
+          totalan_date?: string
+          totalan_number?: string | null
         }
         Relationships: [
           {
@@ -1039,6 +1042,18 @@ export type Database = {
         }
         Returns: string
       }
+      create_kasbon_advance: {
+        Args: {
+          p_amount: number
+          p_entry_date: string
+          p_farmer_id: string
+          p_notes?: string
+        }
+        Returns: {
+          farmer_id: string
+          ledger_entry_id: string
+        }[]
+      }
       create_purchase: {
         Args: { p_payload: Json }
         Returns: {
@@ -1062,6 +1077,15 @@ export type Database = {
       delete_sale_without_payments: {
         Args: { p_sale_id: string }
         Returns: undefined
+      }
+      finalize_totalan: {
+        Args: {
+          p_farmer_id: string
+          p_kasbon_deduction_amount?: number
+          p_totalan_date: string
+          p_transaction_ids: string[]
+        }
+        Returns: string
       }
       is_current_admin: { Args: never; Returns: boolean }
       record_sale_payment: {

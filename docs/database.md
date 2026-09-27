@@ -430,8 +430,17 @@ allocations, counters, and payments.
 ## Applied Purchase atomic operations
 
 Migration `20260923044053_purchase_atomic_operations.sql` establishes the
-database boundary for Pembelian. It does not migrate the Purchase UI; that
-integration remains a later phase.
+database boundary for Pembelian.
+
+### Purchase UI integration
+
+Pembelian is now an active Supabase-backed UI integration. The Purchase provider
+reads the persisted transaction graph (`transactions`, items, containers, and
+required farmer/cycle/schedule relations) through typed adapters; it has no
+fixture fallback. Create uses `create_purchase`, edit uses `update_purchase`,
+and both reload the canonical graph after a successful RPC. Digital and thermal
+Purchase Nota remain derived from that persisted graph rather than stored as
+separate rows.
 
 ### Purchase number allocation
 
@@ -691,6 +700,30 @@ or Supabase dashboard workflow. Financial tables are never exposed to `anon`.
 
 ## Future integration boundary
 
+## Phase 3 application integration
+
+- **Stock is Supabase-derived and read only.** The application maps
+  `available_sale_direct_stock` for direct-weight availability, then reads the
+  persisted `transaction_container_weights` and active
+  `sale_stock_allocations` for exact sack/crate identity and status. Incoming
+  physical stock remains Purchase **gross** kg; active, unreleased allocations
+  are the only Stock-out authority. There is no Stock fixture fallback.
+- **Sales is Supabase-backed.** A repository maps the `sales` graph
+  (`sale_items`, allocations, `sale_payments`, and `sale_change_events`) plus
+  `sale_payment_states` into the application domain. Payment history remains
+  an immutable `sale_payments` ledger ordered by `created_at`; paid and
+  remaining values are read from the database state view.
+- Sales UI mutations call only the applied controlled RPCs:
+  `create_sale`, `record_sale_payment`, `correct_sale`, `cancel_sale`, and
+  `delete_sale_without_payments`. Sale numbers are allocated inside
+  `create_sale`; the browser never creates or reuses a number. After each
+  mutation, Sales and Stock are refetched from Supabase rather than patched
+  from a local mock cache.
+- Digital and thermal Sales Nota are derived from the persisted Sale graph.
+  Buyer Nota retains only allocated physical container weights and never
+  exposes source seller, Purchase identities, allocation identities, or
+  internal expedition costs.
+
 `src/types/database.types.ts` is the generated database-schema source of truth.
 The first migrated module should add an adapter that maps its snake_case rows to
 the existing camelCase domain model, rather than duplicating database schema
@@ -701,6 +734,137 @@ farmer row, verify selected unpaid transactions, insert the totalan and join
 rows, insert its ledger deduction, then commit. The schema's uniqueness, FK,
 amount checks and farmer-row lock in the ledger trigger are designed for that
 future RPC.
+
+## Phase 4A: Totalan + Kasbon database boundary
+
+Migration `20260924020650_totalan_kasbon_atomic_operations.sql` establishes the
+controlled database boundary for Totalan and Kasbon. Migration
+`20260924021846_phase4_totalan_rpc_return_contract.sql` corrects the public
+Totalan return contract so generated types do not represent an optional,
+not-yet-approved human number as a required string. Migration
+`20260924024220_fix_phase4_totalan_returning_ambiguity.sql` is a forward-only
+QA correction: it qualifies the private function's `RETURNING` fields so the
+header, memberships, and ledger remain atomic under PostgreSQL name resolution.
+No applied migration was edited.
+
+### Operational date and Totalan identity
+
+- `totalans.totalan_date` is the required business/operational `date`. It is
+  separate from `finalized_at`, which remains an audit `timestamptz`.
+- The current product has no approved Totalan numbering format. Therefore
+  `totalan_number` is temporarily nullable while retaining its uniqueness
+  constraint. The finalized Totalan UUID is the authoritative identity for
+  Phase 4A. A future approved numbering rule must be added through a new
+  forward migration; it must not derive a human number from browser state.
+- The current table represents finalized Totalans only. Phase 4A does not add a
+  persisted draft lifecycle; a future UI builds its draft locally and submits
+  one atomic finalization request.
+
+### Public RPCs
+
+Only the following public functions are available to the authenticated
+application boundary:
+
+```text
+public.create_kasbon_advance(
+  p_farmer_id uuid,
+  p_entry_date date,
+  p_amount bigint,
+  p_notes text default ''
+) returns table (ledger_entry_id uuid, farmer_id uuid)
+
+public.finalize_totalan(
+  p_farmer_id uuid,
+  p_transaction_ids uuid[],
+  p_totalan_date date,
+  p_kasbon_deduction_amount bigint default 0
+) returns uuid
+```
+
+Their private implementations use `SECURITY DEFINER`, an empty explicit
+`search_path`, fully qualified relations, and `private.require_current_admin()`.
+The public wrappers use `SECURITY INVOKER`. `EXECUTE` is revoked from `PUBLIC`,
+`anon`, and `service_role`, then granted only to `authenticated`; the private
+functions likewise are not publicly executable. The allowlisted Admin check is
+still the decisive authorization condition, so an arbitrary authenticated user
+cannot use either operation.
+
+### Kasbon ledger mutation
+
+`create_kasbon_advance` validates the Admin, Farmer UUID, operational date, and
+positive integer Rupiah amount, locks the Farmer row, then appends an
+`advance` row. A Farmer record is the Petani Mitra identity in the current
+schema; general sellers never have a `farmers` row and cannot receive Kasbon.
+
+Kasbon balance is always derived, never stored as a mutable header field:
+
+```text
+sum(advance.amount) - sum(totalan_deduction.amount)
+```
+
+Every entry amount is positive; the entry type supplies its sign. A Totalan
+deduction is a fresh `totalan_deduction` ledger row linked by the unique
+`related_totalan_id` FK. Existing triggers reject ledger updates/deletes, and
+the deduction trigger independently verifies same-Farmer linkage, exact
+Totalan deduction amount, and non-negative resulting balance.
+
+### Atomic Totalan finalization
+
+`finalize_totalan` accepts only a Farmer UUID, a non-empty unique list of
+Purchase UUIDs, a Totalan operational date, and an optional Kasbon deduction.
+It never accepts a client-computed weight or money total. Within one database
+transaction it:
+
+1. authorizes the Admin and locks the Farmer row;
+2. locks all selected Purchases in ascending UUID order;
+3. verifies every Purchase exists, is `partner_farmer`, belongs to the chosen
+   Farmer, is `unpaid`, and has no existing Totalan membership;
+4. derives gross harvest value and net weight from persisted Purchase totals;
+5. derives the Farmer Kasbon balance from ledger history and validates that the
+   requested deduction is not negative, does not exceed that balance, and does
+   not exceed gross harvest value;
+6. inserts the immutable finalized Totalan, its `totalan_transactions` rows,
+   and, only when needed, one linked Kasbon-deduction ledger row; and
+7. returns the finalized Totalan UUID.
+
+Any controlled error aborts the function transaction, so no header, membership,
+or Kasbon deduction can persist partially. The Farmer lock serializes approved
+Kasbon advances/deductions and same-Farmer finalization attempts. Stable
+Purchase lock ordering is compatible with `update_purchase`; the unique
+`totalan_transactions.transaction_id` constraint remains the final database
+protection against duplicate membership. As a result, the existing
+`update_purchase` membership check now observes finalized Totalans created by
+the official database operation and returns `PURCHASE_FINALIZED_TOTALAN`.
+
+### Direct mutation restrictions
+
+RLS remains enabled and Admin reads remain available through the existing
+`app_admins` model. For the sensitive write boundary, `authenticated` no longer
+has direct `INSERT` privilege on `totalans`, `totalan_transactions`, or
+`kasbon_ledger_entries`; existing direct `UPDATE`/`DELETE` privileges are not
+granted. This prevents browser table writes from bypassing validation while
+preserving the read architecture. `anon` has neither grants nor policies for
+these financial tables.
+
+### Phase 4B application integration
+
+Totalan and Kasbon UI now read their persisted state through typed adapters:
+Totalan combines `totalans`, `totalan_transactions`, Purchases, and Farmers;
+Kasbon derives balances from `kasbon_ledger_entries`. Finalization calls only
+`finalize_totalan` and advances call only `create_kasbon_advance`. The
+application does not retain a mock fallback or perform direct financial-table
+inserts; it refetches persisted state after each approved RPC.
+
+### Phase 5 derived pages
+
+Dashboard, Riwayat, and Laporan Bulanan are read-only views over the same
+Supabase-backed operational providers. Purchase financial value uses persisted
+Purchase totals while incoming physical stock uses gross Purchase weight; Sales
+invoice value and cash received remain distinct, and cancelled Sales are
+excluded from active totals. Totalan is reported separately and is never added
+to Purchase value again. Stock reporting is explicitly current stock state, not
+a reconstructed historical month-end balance. These pages have no analytics
+fixture fallback.
 
 ## PRD ambiguities retained for the next phase
 

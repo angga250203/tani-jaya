@@ -107,7 +107,7 @@ export function TotalanForm() {
   const finalize = async () => {
     if (!selectedFarmer || isFinalizing) return;
     setIsFinalizing(true);
-    const result = finalizeTotalan({ farmerId: selectedFarmer.id, farmerName: selectedFarmer.name, transactionIds: selectedIds, requestedKasbonDeduction });
+    const result = await finalizeTotalan({ farmerId: selectedFarmer.id, transactionIds: selectedIds, requestedKasbonDeduction, totalanDate: new Date().toISOString().slice(0, 10) });
     if (result.error || !result.record) {
       setConfirmOpen(false);
       setFormError(result.error ?? "Totalan tidak dapat diselesaikan.");
@@ -118,6 +118,7 @@ export function TotalanForm() {
     setToast("Totalan berhasil diselesaikan.");
     toastTimerRef.current = setTimeout(() => setToast(null), 2800);
     redirectTimerRef.current = setTimeout(() => router.push(`/totalan/${result.record?.id}`), 700);
+    setIsFinalizing(false);
   };
 
   return (
