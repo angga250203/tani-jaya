@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { purchaseErrorMessage, readPurchases, toPurchasePayload } from "@/lib/purchases";
+import { useSchedules } from "@/components/schedules/schedules-provider";
 import { createClient } from "@/lib/supabase/client";
 import type { TransactionRecord } from "@/lib/transactions";
 import type { TransactionFormValues } from "@/lib/validations";
@@ -22,6 +23,7 @@ type TransactionsContextValue = {
 const TransactionsContext = createContext<TransactionsContextValue | null>(null);
 
 export function TransactionsProvider({ children }: { children: ReactNode }) {
+  const { refresh: refreshSchedules } = useSchedules();
   const [transactions, setTransactions] = useState<TransactionRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -75,9 +77,12 @@ export function TransactionsProvider({ children }: { children: ReactNode }) {
 
     const refreshed = result.data ?? [];
     setTransactions(refreshed);
+    // A Schedule becomes completed through its persisted transactions.schedule_id
+    // relation, so refresh that read model before the post-create navigation.
+    await refreshSchedules();
     const record = refreshed.find((transaction) => transaction.id === transactionId);
     return record ? { record } : { error: "Pembelian sudah tersimpan, tetapi data terbaru belum dapat dimuat." };
-  }, []);
+  }, [refreshSchedules]);
 
   const createTransaction = useCallback(async (values: TransactionFormValues): Promise<PurchaseMutationResult> => {
     const { data, error: rpcError } = await createClient().rpc("create_purchase", { p_payload: toPurchasePayload(values) });

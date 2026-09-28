@@ -10,6 +10,7 @@ type NewSchedule = Omit<HarvestSchedule, "id" | "initials" | "status" | "statusL
 type MutationResult<T> = { data?: T; error?: string };
 type SchedulesContextValue = {
   schedules: HarvestSchedule[];
+  recordedSchedulePurchaseIds: Readonly<Record<string, string>>;
   isLoading: boolean;
   error: string | null;
   refresh: () => Promise<boolean>;
@@ -39,6 +40,7 @@ function calendarDayDifference(fromDateISO: string, toDateISO: string) {
 export function SchedulesProvider({ children }: { children: ReactNode }) {
   const { records, fields, isLoading: masterLoading, error: masterError } = useFarmers();
   const [schedules, setSchedules] = useState<HarvestSchedule[]>([]);
+  const [recordedSchedulePurchaseIds, setRecordedSchedulePurchaseIds] = useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const masterDataRef = useRef({ records, fields, masterLoading, masterError });
@@ -52,6 +54,7 @@ export function SchedulesProvider({ children }: { children: ReactNode }) {
     if (masterData.masterLoading) return false;
     if (masterData.masterError) {
       setSchedules([]);
+      setRecordedSchedulePurchaseIds({});
       setError(masterData.masterError);
       setIsLoading(false);
       return false;
@@ -59,25 +62,45 @@ export function SchedulesProvider({ children }: { children: ReactNode }) {
     setIsLoading(true);
     setError(null);
     const supabase = createClient();
-    const [schedulesResult, changesResult] = await Promise.all([
+    const [schedulesResult, changesResult, purchasesResult] = await Promise.all([
       supabase.from("harvest_schedules").select().neq("status", "cancelled").order("scheduled_date", { ascending: true }),
       supabase.from("harvest_schedule_changes").select().order("created_at", { ascending: true }),
+      supabase.from("transactions").select("id, schedule_id").not("schedule_id", "is", null).order("created_at", { ascending: true }),
     ]);
-    const queryError = schedulesResult.error ?? changesResult.error;
-    if (queryError || !schedulesResult.data || !changesResult.data) {
+    const queryError = schedulesResult.error ?? changesResult.error ?? purchasesResult.error;
+    if (queryError || !schedulesResult.data || !changesResult.data || !purchasesResult.data) {
       setSchedules([]);
+      setRecordedSchedulePurchaseIds({});
       setError(toSupabaseErrorMessage(queryError, "Data Jadwal Panen belum dapat dimuat. Periksa koneksi lalu coba lagi."));
       setIsLoading(false);
       return false;
     }
-    const mapped = toHarvestSchedules(schedulesResult.data, changesResult.data, { farmers: masterData.records, fields: masterData.fields });
-    if (mapped.length !== schedulesResult.data.length) {
+    const nextRecordedSchedulePurchaseIds: Record<string, string> = {};
+    for (const purchase of purchasesResult.data) {
+      // The database currently has no one-to-one constraint for this relation.
+      // Preserve the earliest persisted Purchase as the stable historical target
+      // while the UI blocks creation of any further duplicate.
+      if (purchase.schedule_id && !nextRecordedSchedulePurchaseIds[purchase.schedule_id]) {
+        nextRecordedSchedulePurchaseIds[purchase.schedule_id] = purchase.id;
+      }
+    }
+    const recordedScheduleIds = new Set(Object.keys(nextRecordedSchedulePurchaseIds));
+    const mapped = toHarvestSchedules(
+      schedulesResult.data,
+      changesResult.data,
+      { farmers: masterData.records, fields: masterData.fields },
+      recordedScheduleIds,
+    );
+    const pendingScheduleCount = schedulesResult.data.filter((schedule) => !recordedScheduleIds.has(schedule.id)).length;
+    if (mapped.length !== pendingScheduleCount) {
       setSchedules([]);
+      setRecordedSchedulePurchaseIds({});
       setError("Relasi Jadwal Panen tidak lengkap. Periksa data Petani, Lahan, dan Siklus.");
       setIsLoading(false);
       return false;
     }
     setSchedules(mapped);
+    setRecordedSchedulePurchaseIds(nextRecordedSchedulePurchaseIds);
     setIsLoading(false);
     return true;
   }, []);
@@ -169,7 +192,7 @@ export function SchedulesProvider({ children }: { children: ReactNode }) {
     return await refresh() ? { data: undefined } : { error: "Metode diperbarui, tetapi daftar belum dapat dimuat ulang." };
   }, [refresh, schedules]);
 
-  const value = useMemo(() => ({ schedules, isLoading, error, refresh, addSchedule, postponeSchedule, updateReceivingMethod }), [addSchedule, error, isLoading, postponeSchedule, refresh, schedules, updateReceivingMethod]);
+  const value = useMemo(() => ({ schedules, recordedSchedulePurchaseIds, isLoading, error, refresh, addSchedule, postponeSchedule, updateReceivingMethod }), [addSchedule, error, isLoading, postponeSchedule, recordedSchedulePurchaseIds, refresh, schedules, updateReceivingMethod]);
   return <SchedulesContext.Provider value={value}>{children}</SchedulesContext.Provider>;
 }
 

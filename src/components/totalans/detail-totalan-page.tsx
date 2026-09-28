@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft, ChevronRight, HandCoins, Scale, UserRound } from "lucide-react";
+import { ArrowLeft, ChevronRight, HandCoins, ReceiptText, Scale, UserRound } from "lucide-react";
 import { ContentContainer } from "@/components/layout/content-container";
 import { Card, CardContent } from "@/components/ui/card";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -27,7 +27,7 @@ export function DetailTotalanPage({ initialTotalan, totalanId }: { initialTotala
         <header className="flex items-center gap-3 border-b border-tj-border pb-5 lg:pb-6">
           <Link aria-label="Kembali ke Totalan" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-tj-muted hover:bg-tj-primary-soft hover:text-tj-primary" href="/totalan"><ArrowLeft aria-hidden="true" size={21} /></Link>
           <div className="min-w-0 flex-1"><p className="truncate text-xs font-medium text-tj-muted sm:text-sm">{totalan.number}</p><h1 className="truncate text-[19px] font-bold leading-6 tracking-[-0.02em] text-tj-text lg:text-[28px] lg:leading-8">Detail Totalan</h1></div>
-          <div className="flex shrink-0 items-center gap-2"><Link className="inline-flex min-h-11 items-center rounded-xl px-3 text-sm font-semibold text-tj-primary hover:bg-tj-primary-soft" href={`/nota/nota-totalan-${totalan.id.replace("totalan-", "")}`}>Buka Nota</Link><StatusBadge status="paid">Selesai</StatusBadge></div>
+          <div className="flex shrink-0 items-center gap-2"><Link className="inline-flex min-h-11 items-center gap-2 rounded-xl px-3 text-sm font-semibold text-tj-primary hover:bg-tj-primary-soft" href={`/totalan/${totalan.id}/nota`}><ReceiptText aria-hidden="true" size={18} />Lihat Nota</Link><StatusBadge status="paid">Selesai</StatusBadge></div>
         </header>
 
         <div className="mt-5 space-y-5 lg:mt-7 lg:grid lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start lg:gap-6 lg:space-y-0">

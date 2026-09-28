@@ -127,6 +127,7 @@ export function toHarvestSchedules(
   scheduleRows: HarvestScheduleRow[],
   changeRows: HarvestScheduleChangeRow[],
   masterData: MasterData,
+  recordedScheduleIds: ReadonlySet<string> = new Set(),
 ): HarvestSchedule[] {
   const fieldByCycle = new Map<string, FieldRecord>();
   for (const field of masterData.fields) {
@@ -140,6 +141,11 @@ export function toHarvestSchedules(
   );
 
   return scheduleRows.flatMap((row) => {
+    // A Purchase linked to a schedule is the persisted completion signal. Keep
+    // recorded schedules out of the pending operational read model rather than
+    // maintaining a second mutable completion status.
+    if (recordedScheduleIds.has(row.id)) return [];
+
     const field = fieldByCycle.get(row.cycle_id);
     const cycle = field?.cycles.find((item) => item.id === row.cycle_id);
     const farmer = field ? farmerById.get(field.farmerId) : undefined;
