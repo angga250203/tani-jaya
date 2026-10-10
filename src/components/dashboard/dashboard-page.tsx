@@ -15,7 +15,7 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { deriveSaleTotals, formatSaleDate, saleCommoditySummary, sortSalesNewest, type SaleRecord } from "@/lib/sales";
 import { stockSummary } from "@/lib/stocks";
 import { getOperationalDateISO, isSameOperationalDay } from "@/lib/operational-date";
-import { paymentStatusLabel, sellerTypeLabel, type TransactionRecord } from "@/lib/transactions";
+import { resolvedTransactionPaymentStatus, sellerTypeLabel, transactionPaymentStatusLabel, type TransactionRecord } from "@/lib/transactions";
 import { cn, formatRupiah } from "@/lib/utils";
 
 type ActivitySelection = "HARVEST_TODAY" | "HARVEST_TOMORROW" | "PURCHASES" | "SALES";
@@ -29,7 +29,8 @@ function ActivityButton({ active, children, onClick }: { active: boolean; childr
 }
 
 function PurchaseActivity({ transaction }: { transaction: TransactionRecord }) {
-  return <Link className="block rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tj-primary" href={`/transaksi/${transaction.id}`}><Card className="transition-[border-color,box-shadow,transform] hover:border-tj-primary hover:shadow-[var(--tj-shadow-md)] active:scale-[0.99]"><CardContent className="p-4"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-xs font-semibold text-tj-primary">Pembelian · {transaction.id}</p><p className="mt-1 truncate font-bold text-tj-text">{transaction.sellerName}</p><p className="mt-0.5 text-xs text-tj-muted">{sellerTypeLabel(transaction.sellerType)} · {transaction.items.map((item) => item.commodity).join(" • ")}</p></div><StatusBadge status={transaction.paymentStatus === "PAID" ? "paid" : "pending"}>{paymentStatusLabel(transaction.paymentStatus)}</StatusBadge></div><div className="mt-3 flex items-center justify-between border-t border-tj-border pt-3 text-sm"><span className="text-tj-muted">{transaction.totalNetWeight} kg bersih</span><strong className="text-tj-primary-strong">{formatRupiah(transaction.totalAmount)}</strong></div></CardContent></Card></Link>;
+  const paid = resolvedTransactionPaymentStatus(transaction) === "PAID";
+  return <Link className="block rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tj-primary" href={`/transaksi/${transaction.id}`}><Card className="transition-[border-color,box-shadow,transform] hover:border-tj-primary hover:shadow-[var(--tj-shadow-md)] active:scale-[0.99]"><CardContent className="p-4"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-xs font-semibold text-tj-primary">Pembelian · {transaction.id}</p><p className="mt-1 truncate font-bold text-tj-text">{transaction.sellerName}</p><p className="mt-0.5 text-xs text-tj-muted">{sellerTypeLabel(transaction.sellerType)} · {transaction.items.map((item) => item.commodity).join(" • ")}</p></div><StatusBadge status={paid ? "paid" : "pending"}>{transactionPaymentStatusLabel(transaction)}</StatusBadge></div><div className="mt-3 flex items-center justify-between border-t border-tj-border pt-3 text-sm"><span className="text-tj-muted">{transaction.totalNetWeight} kg bersih</span><strong className="text-tj-primary-strong">{formatRupiah(transaction.totalAmount)}</strong></div></CardContent></Card></Link>;
 }
 
 function SaleActivity({ sale }: { sale: SaleRecord }) {

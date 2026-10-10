@@ -16,8 +16,6 @@ type TransactionsContextValue = {
   refresh: () => Promise<boolean>;
   createTransaction: (values: TransactionFormValues) => Promise<PurchaseMutationResult>;
   updateTransaction: (id: string, values: TransactionFormValues) => Promise<PurchaseMutationResult>;
-  /** Totalan is finalized by its own RPC and must never mutate Purchases locally. */
-  settleTransactionsInTotalan: (transactionIds: string[], totalanId: string) => void;
 };
 
 const TransactionsContext = createContext<TransactionsContextValue | null>(null);
@@ -103,13 +101,6 @@ export function TransactionsProvider({ children }: { children: ReactNode }) {
     return reloadAfterMutation(result.transaction_id);
   }, [reloadAfterMutation]);
 
-  const settleTransactionsInTotalan = useCallback((_transactionIds: string[], _totalanId: string) => {
-    // Intentionally empty: Totalan is still a mock module and cannot alter the
-    // real Purchase source of truth before its own Supabase integration.
-    void _transactionIds;
-    void _totalanId;
-  }, []);
-
   const value = useMemo(() => ({
     transactions,
     isLoading,
@@ -117,8 +108,7 @@ export function TransactionsProvider({ children }: { children: ReactNode }) {
     refresh,
     createTransaction,
     updateTransaction,
-    settleTransactionsInTotalan,
-  }), [createTransaction, error, isLoading, refresh, settleTransactionsInTotalan, transactions, updateTransaction]);
+  }), [createTransaction, error, isLoading, refresh, transactions, updateTransaction]);
 
   return <TransactionsContext.Provider value={value}>{children}</TransactionsContext.Provider>;
 }

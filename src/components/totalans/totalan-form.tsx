@@ -16,7 +16,7 @@ import { Input, SelectField } from "@/components/ui/input";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { emptyNumericValue, toOptionalInteger } from "@/lib/form-numbers";
 import { getOperationalDateISO } from "@/lib/operational-date";
-import { formatTransactionDate } from "@/lib/transactions";
+import { formatTransactionDate, isTransactionEligibleForTotalan } from "@/lib/transactions";
 import { calculateFinalPayment, calculateSelectedNetWeight, calculateSelectedTransactionTotal } from "@/lib/totalans";
 import { cn, formatRupiah } from "@/lib/utils";
 import { totalanFormSchema, type TotalanFormValues } from "@/lib/validations";
@@ -47,12 +47,7 @@ export function TotalanForm() {
   const selectedIds = useWatch({ control, name: "transactionIds" }) ?? emptyTransactionIds;
   const requestedKasbonDeduction = useWatch({ control, name: "kasbonDeduction" }) ?? 0;
   const selectedFarmer = records.find((farmer) => farmer.id === farmerId);
-  const eligibleTransactions = useMemo(() => transactions.filter((transaction) => (
-    transaction.sellerType === "PETANI_MITRA"
-    && transaction.farmerId === farmerId
-    && transaction.paymentStatus === "UNPAID"
-    && !transaction.totalanId
-  )), [farmerId, transactions]);
+  const eligibleTransactions = useMemo(() => transactions.filter((transaction) => isTransactionEligibleForTotalan(transaction, farmerId)), [farmerId, transactions]);
   const selectedTransactions = useMemo(() => eligibleTransactions.filter((transaction) => selectedIds.includes(transaction.id)), [eligibleTransactions, selectedIds]);
   const totalHarvestValue = calculateSelectedTransactionTotal(selectedTransactions);
   const totalNetWeight = calculateSelectedNetWeight(selectedTransactions);
@@ -70,6 +65,14 @@ export function TotalanForm() {
     setValue("transactionIds", []);
     setValue("kasbonDeduction", emptyNumericValue);
   }, [farmerId, setValue]);
+
+  useEffect(() => {
+    const eligibleIds = new Set(eligibleTransactions.map((transaction) => transaction.id));
+    const nextSelectedIds = selectedIds.filter((id) => eligibleIds.has(id));
+    if (nextSelectedIds.length !== selectedIds.length) {
+      setValue("transactionIds", nextSelectedIds, { shouldValidate: true });
+    }
+  }, [eligibleTransactions, selectedIds, setValue]);
 
   useEffect(() => () => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
@@ -107,6 +110,11 @@ export function TotalanForm() {
 
   const finalize = async () => {
     if (!selectedFarmer || isFinalizing) return;
+    if (!selectedTransactions.length) {
+      setConfirmOpen(false);
+      setFormError("Pilihan transaksi sudah tidak memenuhi syarat untuk totalan.");
+      return;
+    }
     setIsFinalizing(true);
     const result = await finalizeTotalan({ farmerId: selectedFarmer.id, transactionIds: selectedIds, requestedKasbonDeduction, totalanDate: getOperationalDateISO() });
     if (result.error || !result.record) {
@@ -149,7 +157,7 @@ export function TotalanForm() {
           </aside>
         </form>
       </ContentContainer>
-      <ResponsiveConfirmDialog cancelLabel="Batal" confirmLabel="Finalisasi" description={`${selectedTransactions.length} transaksi ${selectedFarmer?.name ?? ""} dengan jumlah pembayaran ${formatRupiah(finalPayment)} akan diselesaikan.`} onClose={() => setConfirmOpen(false)} onConfirm={finalize} open={confirmOpen} title="Finalisasi Totalan?" />
+      <ResponsiveConfirmDialog cancelLabel="Batal" confirmLabel="Finalisasi" description={`${selectedTransactions.length} transaksi ${selectedFarmer?.name ?? ""} dengan jumlah pembayaran ${formatRupiah(finalPayment)} akan diselesaikan.`} onClose={() => setConfirmOpen(false)} onConfirm={finalize} open={confirmOpen && selectedTransactions.length > 0} title="Finalisasi Totalan?" />
       <AnimatePresence initial={false}>{toast && <motion.div animate={{ opacity: 1, y: 0 }} className="fixed inset-x-4 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-[60] mx-auto flex max-w-md items-center gap-2 rounded-xl bg-tj-text px-4 py-3 text-sm font-semibold text-white shadow-[var(--tj-shadow-md)] lg:bottom-6" exit={{ opacity: 0, y: reduceMotion ? 0 : 8 }} initial={{ opacity: 0, y: reduceMotion ? 0 : 8 }} role="status" transition={{ duration: reduceMotion ? 0.01 : 0.2 }}><CheckCircle2 aria-hidden="true" className="text-[#bce7c9]" size={20} /><span className="flex-1">{toast}</span><button aria-label="Tutup notifikasi" className="flex h-8 w-8 items-center justify-center" onClick={() => setToast(null)} type="button"><X aria-hidden="true" size={17} /></button></motion.div>}</AnimatePresence>
     </div>
   );

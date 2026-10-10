@@ -1,6 +1,6 @@
 import { calculateKasbonBalance, isKasbonCredit, type KasbonEntry } from "@/lib/kasbons";
 import { type TotalanRecord } from "@/lib/totalans";
-import { type TransactionRecord } from "@/lib/transactions";
+import { isTransactionSettledByTotalan, resolvedTransactionPaymentStatus, type TransactionRecord } from "@/lib/transactions";
 
 export function monthLabel(month: string) {
   return new Intl.DateTimeFormat("id-ID", { month: "long", year: "numeric" }).format(new Date(`${month}-01T00:00:00`));
@@ -21,9 +21,9 @@ export function getMonthlyReport(month: string, transactions: TransactionRecord[
     amount: result.amount + transaction.totalAmount,
     partners: result.partners + Number(transaction.sellerType === "PETANI_MITRA"),
     general: result.general + Number(transaction.sellerType === "PENJUAL_UMUM"),
-    paid: result.paid + Number(transaction.paymentStatus === "PAID" && !transaction.totalanId),
-    unpaid: result.unpaid + Number(transaction.paymentStatus === "UNPAID"),
-    totaled: result.totaled + Number(Boolean(transaction.totalanId)),
+    paid: result.paid + Number(resolvedTransactionPaymentStatus(transaction) === "PAID" && !isTransactionSettledByTotalan(transaction)),
+    unpaid: result.unpaid + Number(resolvedTransactionPaymentStatus(transaction) === "UNPAID"),
+    totaled: result.totaled + Number(isTransactionSettledByTotalan(transaction)),
   }), { count: 0, grossWeight: 0, weight: 0, amount: 0, partners: 0, general: 0, paid: 0, unpaid: 0, totaled: 0 });
   const commodities = Object.values(monthTransactions.flatMap((transaction) => transaction.items).reduce<Record<string, { name: string; weight: number; amount: number; count: number }>>((groups, item) => {
     const group = groups[item.commodity] ?? { name: item.commodity, weight: 0, amount: 0, count: 0 };

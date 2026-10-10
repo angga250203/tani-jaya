@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { TransactionFormValues } from "@/lib/validations";
 import type { Database, Json, Tables } from "@/types/database.types";
-import type { PaymentStatus, PurchaseGrade, SellerType, TransactionRecord, WeighingMethod } from "@/lib/transactions";
+import type { EffectivePaymentStatus, PaymentStatus, PurchaseGrade, SellerType, TransactionRecord, WeighingMethod } from "@/lib/transactions";
 
 type TransactionRow = Tables<"transactions">;
 type TransactionItemRow = Tables<"transaction_items">;
@@ -10,6 +10,7 @@ type FarmerRow = Tables<"farmers">;
 type CycleRow = Tables<"harvest_cycles">;
 type ScheduleRow = Tables<"harvest_schedules">;
 type TotalanTransactionRow = Tables<"totalan_transactions">;
+type TotalanRow = Tables<"totalans">;
 
 type PurchaseReadRow = TransactionRow & {
   farmers: Pick<FarmerRow, "id" | "name"> | null;
@@ -18,7 +19,9 @@ type PurchaseReadRow = TransactionRow & {
   transaction_items: Array<TransactionItemRow & {
     transaction_container_weights: ContainerRow[];
   }>;
-  totalan_transactions: Pick<TotalanTransactionRow, "totalan_id">[];
+  totalan_transactions: (Pick<TotalanTransactionRow, "totalan_id"> & {
+    totalans: Pick<TotalanRow, "id" | "status" | "totalan_number" | "totalan_date" | "finalized_at"> | null;
+  }) | null;
 };
 
 export const purchaseSelect = `
@@ -38,7 +41,10 @@ export const purchaseSelect = `
   farmers!transactions_farmer_id_fkey(id, name),
   harvest_cycles!transactions_cycle_id_fkey(id, field_id, commodity),
   harvest_schedules!transactions_schedule_id_fkey(id, cycle_id, scheduled_date),
-  totalan_transactions(totalan_id),
+  totalan_transactions(
+    totalan_id,
+    totalans!totalan_transactions_totalan_id_fkey(id, status, totalan_number, totalan_date, finalized_at)
+  ),
   transaction_items(
     id,
     commodity,
@@ -81,7 +87,7 @@ function rawTimeToDisplay(time: string | null) {
   return time ? `${time.slice(0, 5).replace(":", ".")} WIB` : "";
 }
 
-export function toPurchaseRecord(row: PurchaseReadRow): TransactionRecord {
+export function toPurchaseRecord(row: PurchaseReadRow, paymentStates: ReadonlyMap<string, EffectivePaymentStatus> = new Map()): TransactionRecord {
   const items = [...(row.transaction_items ?? [])]
     .sort((left, right) => left.created_at.localeCompare(right.created_at))
     .map((item) => {
@@ -103,6 +109,17 @@ export function toPurchaseRecord(row: PurchaseReadRow): TransactionRecord {
       };
     });
 
+  // `totalan_transactions.transaction_id` is unique, so PostgREST embeds this
+  // reverse relationship as a to-one object (or null), not an array.
+  const totalanMembership = row.totalan_transactions ?? undefined;
+  const totalan = totalanMembership?.totalans;
+  const finalizedTotalan = totalan?.status === "finalized"
+    ? { id: totalan.id, number: totalan.totalan_number ?? undefined, totalanDate: totalan.totalan_date, finalizedAt: totalan.finalized_at }
+    : undefined;
+  const effectivePaymentStatus: EffectivePaymentStatus = finalizedTotalan
+    ? "INCLUDED_IN_TOTALAN"
+    : paymentStates.get(row.id) ?? paymentStatus(row.payment_status);
+
   return {
     id: row.id,
     transactionNumber: row.transaction_number,
@@ -118,7 +135,9 @@ export function toPurchaseRecord(row: PurchaseReadRow): TransactionRecord {
     cycleId: row.cycle_id ?? row.harvest_schedules?.cycle_id ?? undefined,
     cycleCommodity: row.harvest_cycles?.commodity ?? undefined,
     paymentStatus: paymentStatus(row.payment_status),
-    totalanId: row.totalan_transactions?.[0]?.totalan_id,
+    effectivePaymentStatus,
+    totalanId: totalanMembership?.totalan_id,
+    finalizedTotalan,
     notes: row.notes ?? "",
     items,
     totalNetWeight: numberValue(row.total_net_weight_kg),
@@ -127,15 +146,27 @@ export function toPurchaseRecord(row: PurchaseReadRow): TransactionRecord {
 }
 
 export async function readPurchases(client: SupabaseClient<Database>) {
-  const { data, error } = await client
-    .from("transactions")
-    .select(purchaseSelect)
-    .order("transaction_date", { ascending: false })
-    .order("transaction_number", { ascending: false });
+  const [purchasesResult, paymentStatesResult] = await Promise.all([
+    client
+      .from("transactions")
+      .select(purchaseSelect)
+      .order("transaction_date", { ascending: false })
+      .order("transaction_number", { ascending: false }),
+    client.from("transaction_payment_states").select("transaction_id, effective_payment_status"),
+  ]);
 
+  const error = purchasesResult.error ?? paymentStatesResult.error;
   if (error) return { data: undefined, error: purchaseErrorMessage(error) };
 
-  return { data: (data as unknown as PurchaseReadRow[]).map(toPurchaseRecord), error: undefined };
+  const paymentStates = new Map<string, EffectivePaymentStatus>();
+  for (const state of paymentStatesResult.data ?? []) {
+    if (!state.transaction_id) continue;
+    paymentStates.set(state.transaction_id, state.effective_payment_status === "included_in_totalan"
+      ? "INCLUDED_IN_TOTALAN"
+      : state.effective_payment_status === "paid" ? "PAID" : "UNPAID");
+  }
+
+  return { data: (purchasesResult.data as unknown as PurchaseReadRow[]).map((row) => toPurchaseRecord(row, paymentStates)), error: undefined };
 }
 
 function toRpcWeighingMethod(method: WeighingMethod) {

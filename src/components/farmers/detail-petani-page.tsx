@@ -33,6 +33,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { StatusBadge } from "@/components/ui/status-badge";
 import type { FarmerStatus, FarmerTransaction } from "@/lib/farmers";
+import { isTransactionEligibleForTotalan } from "@/lib/transactions";
 import { cn, formatRupiah } from "@/lib/utils";
 
 function FarmerStatusBadge({ status }: { status: FarmerStatus }) {
@@ -236,12 +237,7 @@ export function DetailPetaniPage({ farmerId }: { farmerId: string }) {
   const kasbonBalance = getBalance(farmerId);
   const farmerFields = fields.filter((field) => field.farmerId === farmerId);
   const activeCycleCount = farmerFields.flatMap((field) => field.cycles).filter((cycle) => cycle.status === "active").length;
-  const eligibleTotalanCount = transactions.filter((transaction) => (
-    transaction.sellerType === "PETANI_MITRA"
-    && transaction.farmerId === farmerId
-    && transaction.paymentStatus === "UNPAID"
-    && !transaction.totalanId
-  )).length;
+  const eligibleTotalanCount = transactions.filter((transaction) => isTransactionEligibleForTotalan(transaction, farmerId)).length;
   const [statusDialogOpen, setStatusDialogOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);

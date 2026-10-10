@@ -7,7 +7,7 @@ import { ContainerWeightList } from "@/components/notas/container-weight-list";
 import { formatKasbonDate } from "@/lib/kasbons";
 import { type NotaRecord } from "@/lib/notas";
 import { formatTotalanDate, type TotalanRecord } from "@/lib/totalans";
-import { sellerTypeLabel, transactionPaymentStatusLabel, type TransactionItem, type TransactionRecord, weighingMethodLabel } from "@/lib/transactions";
+import { resolvedTransactionPaymentStatus, sellerTypeLabel, transactionPaymentStatusLabel, type TransactionItem, type TransactionRecord, weighingMethodLabel } from "@/lib/transactions";
 import { cn, formatRupiah } from "@/lib/utils";
 
 function DocumentHeader({ nota }: { nota: NotaRecord }) {
@@ -52,8 +52,8 @@ function DocumentFooter() {
 }
 
 function TransactionDocument({ nota, transaction }: { nota: NotaRecord; transaction: TransactionRecord }) {
-  const status = transaction.sellerType === "PETANI_MITRA" && transaction.paymentStatus === "UNPAID" ? "Menunggu Totalan" : transactionPaymentStatusLabel(transaction);
-  return <><DocumentHeader nota={nota} /><section className="mt-6 rounded-xl border border-tj-border p-4"><h2 className="text-sm font-bold text-tj-text">Informasi Penjual</h2><dl className="mt-2 divide-y divide-tj-border"><DetailRow label="Nama Penjual" value={transaction.sellerName} /><DetailRow label="Jenis Penjual" value={sellerTypeLabel(transaction.sellerType)} /><DetailRow label="Tanggal Pembelian" value={formatKasbonDate(transaction.transactionDate)} /></dl></section><TransactionItemList transaction={transaction} /><section className="mt-6 ml-auto max-w-md rounded-xl border border-tj-border bg-tj-canvas px-4"><h2 className="pt-4 text-sm font-bold text-tj-text">Ringkasan Pembayaran</h2><dl className="mt-1 divide-y divide-tj-border"><DetailRow label="Total Berat Bersih" value={`${transaction.totalNetWeight} kg`} /><DetailRow label="Nilai Pembelian" value={formatRupiah(transaction.totalAmount)} emphasis /><DetailRow label="Status Pembayaran" value={<StatusBadge status={transaction.paymentStatus === "PAID" ? "paid" : "pending"}>{status}</StatusBadge>} /></dl></section><div className="mt-5 print:hidden"><Link className="inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-tj-primary hover:underline" href={`/transaksi/${transaction.id}`}>Lihat Pembelian <ExternalLink aria-hidden="true" size={16} /></Link></div><DocumentFooter /></>;
+  const paid = resolvedTransactionPaymentStatus(transaction) === "PAID";
+  return <><DocumentHeader nota={nota} /><section className="mt-6 rounded-xl border border-tj-border p-4"><h2 className="text-sm font-bold text-tj-text">Informasi Penjual</h2><dl className="mt-2 divide-y divide-tj-border"><DetailRow label="Nama Penjual" value={transaction.sellerName} /><DetailRow label="Jenis Penjual" value={sellerTypeLabel(transaction.sellerType)} /><DetailRow label="Tanggal Pembelian" value={formatKasbonDate(transaction.transactionDate)} /></dl></section><TransactionItemList transaction={transaction} /><section className="mt-6 ml-auto max-w-md rounded-xl border border-tj-border bg-tj-canvas px-4"><h2 className="pt-4 text-sm font-bold text-tj-text">Ringkasan Pembayaran</h2><dl className="mt-1 divide-y divide-tj-border"><DetailRow label="Total Berat Bersih" value={`${transaction.totalNetWeight} kg`} /><DetailRow label="Nilai Pembelian" value={formatRupiah(transaction.totalAmount)} emphasis /><DetailRow label="Status Pembayaran" value={<StatusBadge status={paid ? "paid" : "pending"}>{transactionPaymentStatusLabel(transaction)}</StatusBadge>} /></dl></section><div className="mt-5 print:hidden"><Link className="inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-tj-primary hover:underline" href={`/transaksi/${transaction.id}`}>Lihat Pembelian <ExternalLink aria-hidden="true" size={16} /></Link></div><DocumentFooter /></>;
 }
 
 function TotalanTransactionList({ totalan }: { totalan: TotalanRecord }) {
